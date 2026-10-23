@@ -6,9 +6,9 @@
 
 - **首次启动引导**：检测 `%USERPROFILE%\.dcb`（Windows）或 `~/.dcb`（macOS / Linux）。目录或配置不存在时进入欢迎页，依次选择协议、填写 Base URL、API Key 与模型 ID，支持一次添加多个模型。
 - **三种接口协议**
-  - OpenAI **ChatCompletions**（`/v1/chat/completions`）
-  - Anthropic **Messages**（`/v1/messages`）
-  - OpenAI **Responses API**（`/v1/responses`）
+  - OpenAI **ChatCompletions**`/v1/chat/completions`
+  - Anthropic **Messages**`/v1/messages`
+  - OpenAI **Responses API**`/v1/responses`
 - **多供应商 / 多模型**：设置中可新增、修改、删除供应商，拉取模型列表；输入框右下角的菜单可随时切换模型，请求会真实发送到所选模型。
 - **流式对话**：SSE 流式输出、推理过程折叠、Markdown 渲染、代码块一键复制、中断生成。
 - **工作模式**：输入框下方显示工作空间列表与三档权限；点击「选择文件夹」或当前工作空间会弹出系统文件夹选择器。AI 生成的文件写入所选工作空间，并以内联工具卡片与文件标签展示。
