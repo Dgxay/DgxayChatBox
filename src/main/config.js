@@ -13,6 +13,8 @@ const DCB_DIR = process.env.DCB_HOME
   : path.join(os.homedir(), '.dcb');
 const CONFIG_PATH = path.join(DCB_DIR, 'config.json');
 const CHATS_PATH = path.join(DCB_DIR, 'chats.json');
+const MCP_PATH = path.join(DCB_DIR, 'mcp.json');
+const SKILLS_DIR = path.join(DCB_DIR, 'skills');
 
 const DEFAULT_CONFIG = {
   version: 1,
@@ -169,6 +171,8 @@ module.exports = {
   DCB_DIR,
   CONFIG_PATH,
   CHATS_PATH,
+  MCP_PATH,
+  SKILLS_DIR,
   DEFAULT_CONFIG,
   deepMerge,
   hasDcbDir,

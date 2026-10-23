@@ -173,7 +173,7 @@ function renderStepTwo() {
     </div>
     <div class="ob-tip">
       ${icons.key}
-      <span>${escapeHtml(meta.modelHint)}</span>
+      <span>${escapeHtml(meta.modelHint)} 第一个模型会同时作为自动审查模型，可在设置中修改。</span>
     </div>
     <div class="form-error" id="obErr"></div>
   `;
@@ -255,7 +255,7 @@ async function finish() {
 
   const unique = [];
   models.forEach((m) => {
-    if (!unique.find((u) => u.id === m.id)) unique.push({ id: m.id, name: m.name || m.id });
+    if (!unique.find((u) => u.id === m.id)) unique.push({ id: m.id, name: m.name || m.id, contextWindow: 0 });
   });
 
   const provider = {
@@ -264,6 +264,7 @@ async function finish() {
     protocol: protocolOf(draft.protocol),
     baseUrl: draft.baseUrl,
     apiKey: draft.apiKey,
+    reviewModelId: unique[0].id,
     models: unique
   };
 

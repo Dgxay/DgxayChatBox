@@ -7,3 +7,5 @@ shots/
 .DS_Store
 Thumbs.db
 .deb-build/
+__pycache__/
+scripts/__pycache__/

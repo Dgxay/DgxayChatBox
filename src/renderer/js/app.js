@@ -156,7 +156,7 @@ function applyConfigUI() {
   const kbdSet = $('#kbdSettings');
   if (kbdSet) kbdSet.textContent = config.shortcuts?.settings || '';
   const ver = $('#setVersion');
-  if (ver && state.info) ver.textContent = `v${state.info.version}`;
+  if (ver && state.info) ver.textContent = 'V1.1';
 }
 
 /* ------------------------------ 模式与权限 ------------------------------ */
@@ -197,7 +197,11 @@ async function setPermission(permission) {
 
   await patchConfig({ ui: { ...state.config.ui, permission } });
   chat.refreshAll();
-  toast(`权限已切换为${PERMISSIONS[permission].label}`);
+  if (permission === 'normal' && !providers().some((provider) => provider.reviewModelId)) {
+    toast('普通权限已开启；尚未配置自动审查模型，操作都会询问你', 'warn', 4200);
+  } else {
+    toast(`权限已切换为${PERMISSIONS[permission].label}`);
+  }
 }
 
 function confirmFullPermission() {
@@ -278,23 +282,29 @@ async function handleWorkspaceClick(event) {
 /* ------------------------------ 联网授权 ------------------------------ */
 
 async function handlePermissionRequest(request) {
+  const reviewBox = request.review
+    ? `<div class="review-box">${icons.alert}<div><b>${escapeHtml(
+        request.reviewer || '自动审查'
+      )}</b> 未放行这次操作：<br />${escapeHtml(request.review)}</div></div>`
+    : `<div class="review-box review-ok">${icons.shield}<div>尚未配置自动审查模型，普通权限下的所有操作都需要你确认。</div></div>`;
+
   const decision = await openModal({
-    title: request.title || 'AI 请求联网访问',
-    icon: icons.globe,
+    title: request.title || 'AI 请求执行操作',
+    icon: icons.shield,
     width: 'warn',
-    desc: '模型正在尝试访问外部网络。当前为普通权限，任何联网请求都需要你确认。',
+    desc: '普通权限拥有全部能力，但每次实际操作都需要审查模型判断或你的授权。',
     body: `
-      <div class="mono-block"><span>${escapeHtml(request.url || request.host)}</span></div>
-      <p class="form-note">选择「始终允许」后，本次运行期间对 <b>${escapeHtml(request.host)}</b> 的请求不再询问。重启应用会重置。</p>
+      <pre class="op-detail">${escapeHtml(request.detail || '')}</pre>
+      ${reviewBox}
+      <p class="form-note">授权只对本次操作生效。发现命令、路径或参数可疑时请拒绝。</p>
     `,
     actions: [
       { label: '拒绝', value: 'deny' },
-      { label: '允许一次', value: 'once' },
-      { label: '始终允许', value: 'session', variant: 'primary' }
+      { label: '允许一次', value: 'allow', variant: 'primary' }
     ]
   });
 
-  await window.dcb.respondPermission({ id: request.id, decision: decision || 'deny' });
+  await window.dcb.respondPermission({ id: request.id, decision: decision === 'allow' ? 'allow' : 'deny' });
 }
 
 /* ------------------------------ 启动 ------------------------------ */

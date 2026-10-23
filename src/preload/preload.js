@@ -24,6 +24,21 @@ contextBridge.exposeInMainWorld('dcb', {
   fetchModels: (payload) => ipcRenderer.invoke('models:fetch', payload),
   shortcutStatus: () => ipcRenderer.invoke('shortcut:status'),
 
+  listSkills: () => ipcRenderer.invoke('skills:list'),
+  compressContext: (payload) => ipcRenderer.invoke('chat:compress', payload),
+
+  terminalRun: (payload) => ipcRenderer.invoke('terminal:run', payload),
+  terminalAbort: (requestId) => ipcRenderer.invoke('terminal:abort', requestId),
+  onTerminalEvent: (cb) => subscribe('terminal:event', cb),
+
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpAdd: (input) => ipcRenderer.invoke('mcp:add', input),
+  mcpRemove: (id) => ipcRenderer.invoke('mcp:remove', id),
+  mcpStart: (id) => ipcRenderer.invoke('mcp:start', id),
+  mcpStop: (id) => ipcRenderer.invoke('mcp:stop', id),
+  mcpLogs: (id) => ipcRenderer.invoke('mcp:logs', id),
+  onMcpEvent: (cb) => subscribe('mcp:event', cb),
+
   chatSend: (payload) => ipcRenderer.invoke('chat:send', payload),
   chatAbort: (requestId) => ipcRenderer.invoke('chat:abort', requestId),
   onChatEvent: (cb) => subscribe('chat:event', cb),

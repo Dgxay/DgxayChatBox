@@ -91,7 +91,7 @@ export function openMenu(anchor, { items = [], width = 260, align = 'start', gap
   menu.style.width = `${width}px`;
   menu.style.maxWidth = `${Math.max(220, width)}px`;
 
-  const searchable = items.filter((i) => i.type !== 'section' && i.type !== 'sep').length > 9;
+  const searchable = items.filter((i) => i.type !== 'section' && i.type !== 'sep' && i.type !== 'html').length > 9;
 
   const renderItems = (filter = '') => {
     const q = filter.trim().toLowerCase();
@@ -115,6 +115,13 @@ export function openMenu(anchor, { items = [], width = 260, align = 'start', gap
 
     let matched = 0;
     items.forEach((item) => {
+      if (item.type === 'html') {
+        const el = document.createElement('div');
+        el.className = 'menu-html';
+        el.innerHTML = item.html;
+        menu.appendChild(el);
+        return;
+      }
       if (item.type === 'section') {
         if (q) return;
         const el = document.createElement('div');
