@@ -1,43 +1,111 @@
-# DgxayChatBox
+# DgxayChatBox V1.1
 
-一个简洁、明快的多模型 AI 桌面工作台，基于 Electron 构建。支持三种主流模型协议，在对话模式与工作模式之间切换，并让 AI 在受控权限下直接处理本地文件。
+一个简洁、明快的多模型 AI 桌面工作台，基于 Electron 构建。支持三种主流模型协议，在对话模式与工作模式之间切换，并让 AI 在分级权限与自动审查的保护下直接处理本地文件与终端命令。
 
-## 功能
+## 核心功能
 
-- **首次启动引导**：检测 `%USERPROFILE%\.dcb`（Windows）或 `~/.dcb`（macOS / Linux）。目录或配置不存在时进入欢迎页，依次选择协议、填写 Base URL、API Key 与模型 ID，支持一次添加多个模型。
-- **三种接口协议**
-  - OpenAI **ChatCompletions**`/v1/chat/completions`
-  - Anthropic **Messages**`/v1/messages`
-  - OpenAI **Responses API**`/v1/responses`
-- **多供应商 / 多模型**：设置中可新增、修改、删除供应商，拉取模型列表；输入框右下角的菜单可随时切换模型，请求会真实发送到所选模型。
-- **流式对话**：SSE 流式输出、推理过程折叠、Markdown 渲染、代码块一键复制、中断生成。
-- **工作模式**：输入框下方显示工作空间列表与三档权限；点击「选择文件夹」或当前工作空间会弹出系统文件夹选择器。AI 生成的文件写入所选工作空间，并以内联工具卡片与文件标签展示。
-- **三档权限**（主进程强制执行，渲染层无法绕过）：
-  - **无权限**：只能只读访问工作空间，禁止写文件、联网与执行命令。
-  - **普通权限**：可读写工作空间内文件，禁止修改外部文件；联网逐次申请授权，可对同一域名选择本次运行内始终允许。
-  - **完全权限**：可执行终端命令、访问任意文件、无限制联网，切换时必须勾选风险确认。
-- **设置中心**：供应商管理、快捷键录制、全局唤起、发送方式、流式开关、温度、最大回复长度、系统提示词、强调色与对话字号。
-- **本地优先**：配置与对话只保存在本机用户目录，不经过第三方服务器。
+- **三种接口协议**：OpenAI ChatCompletions、Anthropic Messages、OpenAI Responses。
+- **普通权限 + 自动审查**：普通权限默认拥有全部能力，但每次实际操作都会先交给审查模型判断，可疑操作再转交用户确认。
+- **上下文圆环**：模型选择器左侧的浅灰圆环随上下文占用增长填充深灰；点击可查看 token 用量详情。
+- **斜杠命令**：`/压缩` 保留重要上下文并压缩历史；`/技能` 查看已安装 skills，`/技能 名称` 在本次对话中启用。
+- **终端命令**：输入 `!` 开头的命令，对话中生成终端卡片，实时回显 stdout / stderr 与退出码。
+- **MCP 管理**：设置 → MCP 可新增、启动、停止、查看日志；AI 也可通过 `install_mcp_server` 工具安装配置。
+- **每个供应商独立审查模型**：未配置时自动回退到第一个（默认）供应商的审查模型。
+- **本地优先**：配置、对话、MCP 与技能都在本机 `~/.dcb`。
 
 ## 协议支持
 
 | 协议 | 请求地址 | 鉴权 | 适用场景 |
 | --- | --- | --- | --- |
-| `openai` | `POST {base}/v1/chat/completions` | `Authorization: Bearer` | OpenAI、DeepSeek、Moonshot、Qwen、Ollama 及大多数兼容网关 |
+| `openai` | `POST {base}/v1/chat/completions` | `Authorization: Bearer` | OpenAI、DeepSeek、Moonshot、Qwen、Ollama 及兼容网关 |
 | `anthropic` | `POST {base}/v1/messages` | `x-api-key` + `anthropic-version` | Claude 官方与 Anthropic 兼容网关 |
 | `responses` | `POST {base}/v1/responses` | `Authorization: Bearer` | OpenAI Responses API，支持函数调用 |
 
-Base URL 可以只填域名（`https://api.anthropic.com`）、带版本前缀（`https://api.openai.com/v1`）或完整端点，应用会自动补全路径。工具调用会按协议转换为 `tool_calls` / `tool_use` / `function_call`，三种协议下工作模式的行为保持一致。
+Base URL 可只填域名（`https://api.anthropic.com`）、带版本前缀（`https://api.openai.com/v1`）或完整端点。工具调用会按协议转换为 `tool_calls` / `tool_use` / `function_call`，三种协议下工作模式行为一致。
 
-## 数据与配置
+## 分级权限（V1.1）
+
+| 能力 | 无权限 | 普通权限 | 完全权限 |
+| --- | --- | --- | --- |
+| 读取工作空间文件 | ✅ | ✅ | ✅ |
+| 写入 / 删除文件 | ❌ | ✅（需审查） | ✅ |
+| 访问工作空间外文件 | ❌ | ✅（需审查） | ✅ |
+| 执行终端命令 | ❌ | ✅（需审查） | ✅ |
+| 联网工具 | ❌ | ✅（需审查） | ✅ |
+| 授权流程 | — | 先自动审查，可疑时询问用户 | 无 |
+
+**普通权限**拥有全部能力，但每次工具调用（以及 `!` 终端命令）都会经过：
+
+1. 自动审查模型接收操作、参数、工作空间与命令，返回 `allow` 或 `review`；
+2. `allow`：直接执行，界面显示「自动审查」标记；
+3. `review`：弹窗展示操作详情与审查理由，由你选择「允许一次」或「拒绝」。
+
+在 **设置 → 供应商 → 编辑** 中配置「自动审查模型」。若当前供应商未配置，则使用列表第一个（默认）供应商的审查模型；两者都未配置时，所有操作都会直接询问你。
+
+## 上下文圆环
+
+模型选择器左侧的圆环：
+
+- 浅灰轨道代表模型完整上下文窗口；
+- 深灰圆弧代表估算占用，随消息增长；
+- 点击查看已用 / 上限 token、剩余空间、消息数、当前模型与技能；
+- 可在供应商编辑中为每个模型填写上下文窗口，留空时按协议默认（ChatCompletions 128k，Anthropic / Responses 200k）。
+
+用量按字符启发式估算（中文按 1 token），实际以模型返回的 `usage` 为准。
+
+## 斜杠命令
+
+在输入框开头输入 `/`：
+
+| 命令 | 行为 |
+| --- | --- |
+| `/压缩`（或 `/compress`） | 调用当前模型总结对话，只保留目标、决定、文件路径与待办，替换历史以降低上下文占用。 |
+| `/技能`（或 `/skill`） | 展示 `~/.dcb/skills` 中已安装的技能。 |
+| `/技能 <名称> [提示词]` | 在本次对话启用技能，并可同时发送提示词。 |
+
+技能可以是包含 `SKILL.md` 的文件夹，或单个 `name.md` 文件，支持 frontmatter：
+
+```markdown
+---
+name: report-writer
+description: 按固定格式生成周报
+---
+
+技能启用后要求模型遵循的指令……
+```
+
+启用的技能会显示为输入框中的标签，并随对话持久化。
+
+## 终端命令
+
+以 `!` 开头发送：
+
+```
+!git status
+!npm test
+```
+
+应用会在对话中创建终端卡片，在当前工作空间（未选择时为用户目录）执行命令，实时显示 stdout / stderr 与退出码。普通权限下先审查/询问，完全权限直接执行，无权限直接拒绝。终端输出也会进入 AI 上下文。
+
+## MCP
+
+**设置 → MCP** 会读取 `~/.dcb/mcp.json`，支持启动、停止、实时日志、PID、工作目录与删除；也可手动新增（名称、命令、参数、环境变量、工作目录），或让 AI 安装：
+
+> 帮我安装 filesystem MCP，允许访问我的项目目录
+
+模型会调用 `install_mcp_server` 保存配置，随后到 设置 → MCP 点击「启动」即可。应用退出时会自动停止所有 MCP 进程。
+
+## 数据目录
 
 ```
 %USERPROFILE%\.dcb\
-├── config.json   # 供应商、密钥、模型、模式、权限、快捷键等
-└── chats.json    # 对话记录（仅保存有消息的会话）
+├── config.json   # 供应商、模型、审查模型、模式、快捷键
+├── chats.json    # 对话历史、技能、终端输出
+├── mcp.json      # MCP server 配置
+└── skills/       # 已安装技能（SKILL.md 或 name.md）
 ```
 
-`config.json` 首次保存时自动创建，在支持 POSIX 权限的平台上以 `0600` 写入。开发时可用 `DCB_HOME` 环境变量指定其他目录。
+`config.json` 在支持 POSIX 权限的平台上以 `0600` 写入。开发时可用 `DCB_HOME` 指定其他目录。
 
 ## 开发
 
@@ -45,7 +113,7 @@ Base URL 可以只填域名（`https://api.anthropic.com`）、带版本前缀�
 
 ```bash
 npm install
-npm start        # 启动应用
+npm start        # 启动
 npm run dev      # 启动并打开开发者工具
 ```
 
@@ -55,37 +123,24 @@ npm run dev      # 启动并打开开发者工具
 
 ```bash
 npm run dist         # Windows x64 安装包（NSIS）
-npm run dist:mac     # macOS arm64 安装包（Apple Silicon）
-npm run dist:linux   # Debian / Ubuntu .deb（x64）
+npm run dist:mac     # macOS arm64 DMG（M 系列，需在 macOS 上运行）
+npm run dist:linux   # Debian / Ubuntu .deb（x64，需在 Linux 上运行）
 ```
 
-产物输出到 `dist/`。跨平台说明：
+产物输出到 `dist/`。说明：
 
-- Windows 安装包可在 Windows 上直接构建。
-- macOS 安装包必须在 macOS 上构建：electron-builder 在其他平台会直接拒绝 `--mac`，DMG 也依赖系统的 `hdiutil`。目标架构为 arm64（M 系列芯片）。
-- Debian 包可在 Linux 上构建，适用于 Debian 与 Ubuntu。在 Windows 上可先构建 `--linux dir`，再运行 `python scripts/make-deb.py` 生成等效的 `.deb`。
-- `.github/workflows/build.yml` 会在 GitHub Actions 上并行执行三个平台的构建（`windows-latest`、`macos-14`、`ubuntu-22.04`），并上传安装包产物。
-
-## 权限矩阵
-
-| 能力 | 无权限 | 普通权限 | 完全权限 |
-| --- | --- | --- | --- |
-| 读取工作空间文件 | ✅ | ✅ | ✅ |
-| 写入 / 删除工作空间文件 | ❌ | ✅ | ✅ |
-| 读取工作空间外文件 | ❌ | ✅ | ✅ |
-| 修改工作空间外文件 | ❌ | ❌ | ✅ |
-| 执行终端命令 | ❌ | ❌ | ✅ |
-| 联网工具 | ❌ | 每次申请（可记住本次运行） | ✅ |
-
-暴露给模型的工具会随权限裁剪，每次工具调用还会在主进程中再次校验路径与权限。
+- electron-builder 禁止在非 macOS 上构建 macOS 产物，DMG 还依赖 `hdiutil`；请使用 Mac 或仓库内置的 `macos-14` GitHub Actions。
+- 在 Windows 上可执行 `npx electron-builder --linux dir --x64`，再运行 `python scripts/make-deb.py`，无需 `fpm` 也能生成合法的 Debian 包。
+- 在 Windows 上可用 `@electron/packager` 生成 arm64 `.app`，再用 `python scripts/make-mac-zip.py` 打成便携 zip；它不是 DMG，且未签名。
+- `.github/workflows/build.yml` 会在 GitHub Actions 上构建 Windows、macOS arm64 与 Linux 三平台产物。
 
 ## 目录结构
 
 ```
 src/
-├── main/        # 窗口、配置存储、三种协议客户端、工具沙箱
+├── main/        # 窗口、配置、三协议客户端、审查与工具沙箱、MCP、技能
 ├── preload/     # contextBridge IPC 白名单
-└── renderer/    # 对话界面、设置、引导、Markdown 渲染
+└── renderer/    # 对话、上下文圆环、斜杠命令、终端、设置、引导
 ```
 
 ## 许可证

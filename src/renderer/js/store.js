@@ -80,7 +80,9 @@ export function activeModel() {
     id: model.id,
     name: model.name || model.id,
     providerId: provider.id,
-    providerName: provider.name
+    providerName: provider.name,
+    protocol: provider.protocol || 'openai',
+    contextWindow: Number(model.contextWindow) || 0
   };
 }
 
@@ -123,7 +125,7 @@ export const PERMISSIONS = {
   normal: {
     label: '普通权限',
     short: '普通',
-    desc: '可读写工作空间内文件，联网需向你申请授权'
+    desc: '拥有全部能力，每次操作先由审查模型判断，可疑操作转交你确认'
   },
   full: {
     label: '完全权限',
@@ -153,6 +155,7 @@ export function ensureChat() {
     id: uid('chat'),
     title: '新对话',
     mode: currentMode(),
+    skill: '',
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -169,6 +172,7 @@ export function createNewChat() {
     id: uid('chat'),
     title: '新对话',
     mode: currentMode(),
+    skill: '',
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -212,6 +216,7 @@ export function persistChatsNow() {
       id: c.id,
       title: c.title,
       mode: c.mode,
+      skill: c.skill || '',
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
       messages: c.messages.map((m) => ({
@@ -222,7 +227,15 @@ export function persistChatsNow() {
         files: m.files?.length ? m.files : undefined,
         reasoning: m.reasoning || undefined,
         error: m.error || undefined,
-        usage: m.usage || undefined
+        usage: m.usage || undefined,
+        compressed: m.compressed || undefined,
+        command: m.command || undefined,
+        cwd: m.cwd || undefined,
+        output: m.output || undefined,
+        stderr: m.stderr || undefined,
+        exitCode: Number.isInteger(m.exitCode) ? m.exitCode : undefined,
+        status: m.status || undefined,
+        review: m.review || undefined
       }))
     }));
   return window.dcb.saveChats(payload).catch(() => false);

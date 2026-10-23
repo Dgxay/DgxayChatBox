@@ -23,6 +23,10 @@ const TABS = {
     title: '快捷键',
     desc: '为常用操作绑定顺手的组合键。点击按键框后直接按下新的组合键即可。'
   },
+  mcp: {
+    title: 'MCP Server',
+    desc: '管理已安装的 MCP 服务。可以让 AI 在对话中安装，或手动添加后在这里启动与停止。'
+  },
   general: {
     title: '通用设置',
     desc: '发送方式、生成参数与界面偏好，都会即时保存到本地配置。'
@@ -63,6 +67,26 @@ export function initSettings() {
   on('chat-changed', () => {
     if (state.settingsOpen) closeSettings();
   });
+  window.dcb.onMcpEvent((event) => {
+    if (!state.settingsOpen || currentTab !== 'mcp') return;
+    if (event.type === 'status') {
+      renderMcp();
+      return;
+    }
+    if (event.type === 'log') {
+      const log = document.querySelector(`[data-mcp-log="${event.id}"]`);
+      if (!log) return;
+      if (log.dataset.empty === '1') {
+        log.innerHTML = '';
+        log.dataset.empty = '0';
+      }
+      const line = document.createElement('span');
+      line.className = event.stream === 'stderr' ? 'err' : '';
+      line.textContent = event.text;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    }
+  });
   on('config', () => {
     if (state.settingsOpen && !recordingKey && !document.querySelector('.modal')) {
       // 外部配置变化时保持界面同步（避免打断输入）
@@ -83,6 +107,7 @@ function renderTab(tab) {
 
   if (tab === 'providers') renderProviders();
   else if (tab === 'shortcuts') renderShortcuts();
+  else if (tab === 'mcp') renderMcp();
   else if (tab === 'general') renderGeneral();
   else renderData();
 }
@@ -95,9 +120,14 @@ function renderProviders() {
   const defaultModel = state.config.activeModelId;
 
   const cards = list
-    .map((provider) => {
+    .map((provider, providerIndex) => {
       const models = provider.models || [];
       const isActive = active && active.id === provider.id;
+      const reviewLabel = provider.reviewModelId
+        ? (models.find((model) => model.id === provider.reviewModelId)?.name || provider.reviewModelId)
+        : providerIndex === 0
+          ? '未配置'
+          : '默认供应商';
       return `
       <div class="card" data-provider="${provider.id}">
         <div class="card-head">
@@ -106,6 +136,7 @@ function renderProviders() {
               <span class="provider-dot" style="${isActive ? '' : 'background:#c9c2b6'}"></span>
               ${escapeHtml(provider.name || '未命名供应商')}
               <span class="protocol-badge">${escapeHtml(protocolMeta(provider.protocol).short)}</span>
+              ${providerIndex === 0 && list.length > 1 ? '<span class="protocol-badge">默认</span>' : ''}
               ${isActive ? '<span class="model-tag default" style="margin-left:4px">当前</span>' : ''}
             </div>
             <p class="card-sub">${escapeHtml(provider.baseUrl)}</p>
@@ -128,6 +159,7 @@ function renderProviders() {
         </div>
         <div class="provider-meta">
           <span>协议：<b>${escapeHtml(protocolMeta(provider.protocol).full)}</b></span>
+          <span>审查模型：<b>${escapeHtml(reviewLabel)}</b></span>
           <span>API Key：<b>${escapeHtml(maskKey(provider.apiKey))}</b></span>
           <span>模型：<b>${models.length}</b> 个</span>
         </div>
@@ -184,14 +216,40 @@ function maskKey(key) {
   return `${str.slice(0, 3)}••••••${str.slice(-4)}`;
 }
 
-function providerRow(id = '', name = '') {
+function providerRow(id = '', name = '', contextWindow = '') {
   return `<div class="model-row">
     <input class="input mono" data-field="id" value="${escapeHtml(id)}" placeholder="模型 ID，如 gpt-4o" spellcheck="false" />
     <input class="input" data-field="name" value="${escapeHtml(name)}" placeholder="显示名称（可选）" />
+    <input class="input mono" data-field="context" type="number" min="0" step="1000" value="${contextWindow || ''}" placeholder="128000" title="上下文窗口，留空则按协议默认" />
     <button class="mr-del" type="button" title="移除">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>`;
+}
+
+function refreshReviewSelect(bodyEl, preferred) {
+  const select = bodyEl.querySelector('#pvReview');
+  if (!select) return;
+  const current = preferred ?? select.value;
+  const models = $$('#pvModels .model-row')
+    .map((row) => ({
+      id: row.querySelector('[data-field="id"]').value.trim(),
+      name: row.querySelector('[data-field="name"]').value.trim()
+    }))
+    .filter((model) => model.id);
+  const unique = [];
+  models.forEach((model) => {
+    if (!unique.find((item) => item.id === model.id)) unique.push(model);
+  });
+  select.innerHTML =
+    '<option value="">不配置（使用默认供应商）</option>' +
+    unique
+      .map(
+        (model) =>
+          `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)} · ${escapeHtml(model.id)}</option>`
+      )
+      .join('');
+  if (unique.some((model) => model.id === current)) select.value = current;
 }
 
 function openProviderEditor(provider) {
@@ -204,6 +262,7 @@ function openProviderEditor(provider) {
   let selectedProtocol = draft.protocol;
 
   const protocolMetaInfo = PROTOCOLS[draft.protocol];
+  const reviewModels = draft.models.filter((model) => model.id);
   const body = `
     <div class="field">
       <label>接口协议 <span class="hint" id="pvBasePath">${protocolMetaInfo.path}</span></label>
@@ -226,9 +285,25 @@ function openProviderEditor(provider) {
       </div>
     </div>
     <div class="field">
+      <label>自动审查模型 <span class="hint">未配置时使用默认供应商</span></label>
+      <select class="input" id="pvReview">
+        <option value="">不配置（使用默认供应商）</option>
+        ${reviewModels
+          .map(
+            (model) =>
+              `<option value="${escapeHtml(model.id)}" ${draft.reviewModelId === model.id ? 'selected' : ''}>${escapeHtml(
+                model.name || model.id
+              )} · ${escapeHtml(model.id)}</option>`
+          )
+          .join('')}
+      </select>
+    </div>
+    <div class="field">
       <label>模型列表 <span class="hint">可添加多个，对话时随时切换</span></label>
-      <div class="model-row-head"><span>模型 ID</span><span>显示名称</span><span></span></div>
-      <div class="model-rows" id="pvModels">${draft.models.map((m) => providerRow(m.id, m.name)).join('')}</div>
+      <div class="model-row-head"><span>模型 ID</span><span>显示名称</span><span>上下文窗口</span><span></span></div>
+      <div class="model-rows" id="pvModels">${draft.models
+        .map((m) => providerRow(m.id, m.name, m.contextWindow))
+        .join('')}</div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:9px;flex-wrap:wrap">
         <button class="btn btn-sm" type="button" id="pvAddModel">+ 添加模型</button>
         <button class="btn btn-sm" type="button" id="pvFetch">拉取模型列表</button>
@@ -241,7 +316,7 @@ function openProviderEditor(provider) {
 
   openModal({
     title: editing ? '编辑供应商' : '新增供应商',
-    desc: '支持 OpenAI ChatCompletions、Anthropic Messages 与 OpenAI Responses 三种协议，按供应商实际接口选择。',
+    desc: '选择供应商实际使用的接口协议，并配置用于安全审查的模型。',
     width: 'wide',
     body,
     actions: [
@@ -255,13 +330,15 @@ function openProviderEditor(provider) {
           const baseUrl = $('#pvBase').value.trim().replace(/\/+$/, '');
           const apiKey = $('#pvKey').value.trim();
           const protocol = protocolOf(selectedProtocol);
+          const reviewModelId = $('#pvReview').value;
           const models = $$('#pvModels .model-row')
             .map((row) => ({
               id: row.querySelector('[data-field="id"]').value.trim(),
-              name: row.querySelector('[data-field="name"]').value.trim()
+              name: row.querySelector('[data-field="name"]').value.trim(),
+              contextWindow: Number(row.querySelector('[data-field="context"]').value) || 0
             }))
             .filter((m) => m.id)
-            .map((m) => ({ id: m.id, name: m.name || m.id }));
+            .map((m) => ({ id: m.id, name: m.name || m.id, contextWindow: m.contextWindow }));
 
           if (!/^https?:\/\//i.test(baseUrl)) {
             errEl.textContent = '请填写以 http:// 或 https:// 开头的 Base URL';
@@ -277,9 +354,11 @@ function openProviderEditor(provider) {
           });
 
           const next = providers().map((p) =>
-            p.id === draft.id ? { ...p, name, protocol, baseUrl, apiKey, models: unique } : p
+            p.id === draft.id
+              ? { ...p, name, protocol, baseUrl, apiKey, reviewModelId, models: unique }
+              : p
           );
-          if (!editing) next.push({ id: draft.id, name, protocol, baseUrl, apiKey, models: unique });
+          if (!editing) next.push({ id: draft.id, name, protocol, baseUrl, apiKey, reviewModelId, models: unique });
 
           const patch = { providers: next };
           if (!editing && !state.config.activeProviderId) {
@@ -317,9 +396,16 @@ function openProviderEditor(provider) {
         });
       });
 
+      refreshReviewSelect(bodyEl, draft.reviewModelId);
+
       bodyEl.querySelector('#pvAddModel').addEventListener('click', () => {
         bodyEl.querySelector('#pvModels').insertAdjacentHTML('beforeend', providerRow());
         bodyEl.querySelector('#pvModels').lastElementChild.querySelector('input').focus();
+        refreshReviewSelect(bodyEl);
+      });
+
+      bodyEl.querySelector('#pvModels').addEventListener('input', (event) => {
+        if (event.target.matches('[data-field="id"], [data-field="name"]')) refreshReviewSelect(bodyEl);
       });
 
       bodyEl.querySelector('#pvModels').addEventListener('click', (event) => {
@@ -328,9 +414,11 @@ function openProviderEditor(provider) {
         const rows = bodyEl.querySelectorAll('#pvModels .model-row');
         if (rows.length <= 1) {
           rows[0].querySelectorAll('input').forEach((input) => (input.value = ''));
+          refreshReviewSelect(bodyEl);
           return;
         }
         del.closest('.model-row').remove();
+        refreshReviewSelect(bodyEl);
       });
 
       bodyEl.querySelector('#pvReveal').addEventListener('click', (event) => {
@@ -371,6 +459,7 @@ function openProviderEditor(provider) {
               } else {
                 $('#pvModels').insertAdjacentHTML('beforeend', providerRow(chip.dataset.id));
               }
+              refreshReviewSelect(bodyEl);
             });
           });
         } catch (err) {
@@ -676,6 +765,193 @@ function renderGeneral() {
   });
 }
 
+/* ------------------------------ MCP ------------------------------ */
+
+function mcpStatusLabel(status) {
+  return (
+    {
+      running: '运行中',
+      stopped: '已停止',
+      stopping: '停止中',
+      error: '异常'
+    }[status] || status
+  );
+}
+
+function mcpCard(server) {
+  const status = server.status || 'stopped';
+  const running = status === 'running';
+  const args = (server.args || []).join(' ');
+  const logs = (server.logs || [])
+    .map((line) => `<span class="${line.stream === 'stderr' ? 'err' : ''}">${escapeHtml(line.text)}</span>`)
+    .join('\n');
+  return `<div class="mcp-card" data-mcp="${escapeHtml(server.id)}">
+    <div class="mcp-top">
+      <div style="min-width:0">
+        <div class="mcp-name">${escapeHtml(server.name)}<span class="mcp-state ${escapeHtml(status)}">${mcpStatusLabel(
+          status
+        )}</span>${server.pid ? `<span class="hint" style="font-size:10.5px">pid ${server.pid}</span>` : ''}</div>
+        <p class="mcp-cmd">${escapeHtml(server.command)} ${escapeHtml(args)}</p>
+        ${server.cwd ? `<p class="mcp-hint">工作目录：<code>${escapeHtml(server.cwd)}</code></p>` : ''}
+        ${
+          server.error
+            ? `<p class="mcp-hint" style="color:var(--danger)">${escapeHtml(server.error)}</p>`
+            : ''
+        }
+      </div>
+      <div class="mcp-actions">
+        <button class="btn btn-sm" data-mcp-act="${running ? 'stop' : 'start'}">${running ? '停止' : '启动'}</button>
+        <button class="btn btn-sm btn-danger" data-mcp-act="delete">删除</button>
+      </div>
+    </div>
+    <div class="mcp-log" data-mcp-log="${escapeHtml(server.id)}" data-empty="${logs ? '0' : '1'}">${
+      logs || '<span style="color:var(--text-3)">暂无日志</span>'
+    }</div>
+  </div>`;
+}
+
+async function renderMcp() {
+  const body = $('#setBody');
+  body.innerHTML = `<div class="card"><div class="card-title">正在读取 MCP 配置…</div></div>`;
+  let servers = [];
+  try {
+    servers = await window.dcb.mcpList();
+  } catch (err) {
+    body.innerHTML = `<div class="card"><div class="card-title" style="color:var(--danger)">读取 MCP 配置失败</div><p class="mcp-hint">${escapeHtml(
+      err.message
+    )}</p></div>`;
+    return;
+  }
+  if (currentTab !== 'mcp') return;
+
+  body.innerHTML = `
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:14px">
+      <div>
+        <div class="card-title">已安装 ${servers.length} 个 MCP Server</div>
+        <p class="card-sub" style="font-family:inherit">配置保存在 ~/.dcb/mcp.json，退出应用时会自动停止</p>
+      </div>
+      <button class="btn btn-primary" id="btnAddMcp">${icons.plus}<span>新增 MCP</span></button>
+    </div>
+    ${
+      servers.length
+        ? servers.map(mcpCard).join('')
+        : `<div class="empty-card">
+            <div class="ec-icon">${icons.terminal}</div>
+            <h3>还没有 MCP Server</h3>
+            <p>可以让 AI 在对话中安装，或手动添加启动命令</p>
+            <button class="btn btn-primary" id="btnAddMcpEmpty">新增 MCP</button>
+          </div>`
+    }
+  `;
+
+  $('#btnAddMcp')?.addEventListener('click', () => openMcpEditor());
+  $('#btnAddMcpEmpty')?.addEventListener('click', () => openMcpEditor());
+
+  $$('#setBody [data-mcp]').forEach((card) => {
+    const server = servers.find((item) => item.id === card.dataset.mcp);
+    if (!server) return;
+    card.querySelectorAll('[data-mcp-act]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.mcpAct;
+        if (action === 'start' || action === 'stop') {
+          button.disabled = true;
+          try {
+            if (action === 'start') {
+              await window.dcb.mcpStart(server.id);
+              toast(`已启动 ${server.name}`);
+            } else {
+              await window.dcb.mcpStop(server.id);
+              toast(`已停止 ${server.name}`);
+            }
+          } catch (err) {
+            toast(err.message || '操作失败', 'error');
+          }
+          setTimeout(renderMcp, 250);
+          return;
+        }
+        if (action === 'delete') {
+          const ok = await confirmDialog({
+            title: '删除这个 MCP Server？',
+            message: `将停止并移除「${escapeHtml(server.name)}」的启动配置，此操作不可恢复。`,
+            confirmText: '删除'
+          });
+          if (!ok) return;
+          try {
+            await window.dcb.mcpRemove(server.id);
+            toast('MCP Server 已删除');
+            renderMcp();
+          } catch (err) {
+            toast(err.message || '删除失败', 'error');
+          }
+        }
+      });
+    });
+  });
+}
+
+function openMcpEditor() {
+  openModal({
+    title: '新增 MCP Server',
+    desc: '填写 MCP 服务的启动命令。配置会写入 ~/.dcb/mcp.json，之后可在此启动或停止。',
+    width: 'wide',
+    body: `
+      <div class="field">
+        <label>名称</label>
+        <input class="input" id="mcpName" placeholder="例如 filesystem" />
+      </div>
+      <div class="field">
+        <label>启动命令</label>
+        <input class="input mono" id="mcpCommand" placeholder="npx" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>参数 <span class="hint">空格分隔</span></label>
+        <input class="input mono" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-filesystem D://work" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>环境变量 <span class="hint">每行 KEY=value</span></label>
+        <textarea class="input mono" id="mcpEnv" placeholder="API_KEY=xxx" spellcheck="false"></textarea>
+      </div>
+      <div class="field">
+        <label>工作目录 <span class="hint">可选</span></label>
+        <input class="input mono" id="mcpCwd" placeholder="留空使用 ~/.dcb" spellcheck="false" />
+      </div>
+      <div class="form-error" id="mcpErr"></div>
+    `,
+    actions: [
+      { label: '取消', value: false },
+      {
+        label: '添加',
+        variant: 'primary',
+        onClick: async () => {
+          const name = $('#mcpName').value.trim();
+          const command = $('#mcpCommand').value.trim();
+          if (!name || !command) {
+            $('#mcpErr').textContent = '名称与启动命令不能为空';
+            return false;
+          }
+          try {
+            await window.dcb.mcpAdd({
+              name,
+              command,
+              args: $('#mcpArgs').value.trim(),
+              env: $('#mcpEnv').value,
+              cwd: $('#mcpCwd').value.trim()
+            });
+            return true;
+          } catch (err) {
+            $('#mcpErr').textContent = err.message || '添加失败';
+            return false;
+          }
+        }
+      }
+    ]
+  }).then((saved) => {
+    if (!saved) return;
+    toast('MCP Server 已添加');
+    renderMcp();
+  });
+}
+
 /* ------------------------------ 数据 ------------------------------ */
 
 function renderData() {
@@ -691,6 +967,8 @@ function renderData() {
       </div>
       <div class="kv-list">
         <dt>配置文件</dt><dd>${escapeHtml(info.paths?.config || '')}</dd>
+        <dt>MCP 配置</dt><dd>${escapeHtml(info.paths?.mcp || '~/.dcb/mcp.json')}</dd>
+        <dt>技能目录</dt><dd>${escapeHtml(info.paths?.skills || '~/.dcb/skills')}</dd>
         <dt>对话数量</dt><dd>${chatCount} 段</dd>
         <dt>当前权限</dt><dd>${PERMISSIONS[state.config.ui.permission]?.label || '普通权限'}</dd>
       </div>
@@ -728,7 +1006,7 @@ function renderData() {
         </div>
       </div>
       <div class="kv-list">
-        <dt>版本</dt><dd>v${escapeHtml(info.version || '1.0.0')}</dd>
+        <dt>版本</dt><dd>V1.1（${escapeHtml(info.version || '1.1.0')}）</dd>
         <dt>运行环境</dt><dd>Electron · ${escapeHtml(info.platform || 'win32')}</dd>
         <dt>接口协议</dt><dd>ChatCompletions · Anthropic Messages · Responses</dd>
         <dt>配置文件</dt><dd>~/.dcb/config.json</dd>

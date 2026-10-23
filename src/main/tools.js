@@ -101,12 +101,32 @@ const DEFINITIONS = {
       }
     }
   },
+  install_mcp_server: {
+    type: 'function',
+    function: {
+      name: 'install_mcp_server',
+      description:
+        'Install an MCP server into DgxayChatBox by saving its startup command to ~/.dcb/mcp.json. The user can start it later from Settings → MCP.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Display name for the MCP server.' },
+          command: { type: 'string', description: 'Executable used to start the server, e.g. npx or uvx.' },
+          args: { type: 'array', items: { type: 'string' }, description: 'Command arguments.' },
+          env: { type: 'object', additionalProperties: { type: 'string' }, description: 'Extra environment variables.' },
+          cwd: { type: 'string', description: 'Optional working directory.' }
+        },
+        required: ['name', 'command'],
+        additionalProperties: false
+      }
+    }
+  },
   fetch_url: {
     type: 'function',
     function: {
       name: 'fetch_url',
       description:
-        'Fetch a URL over HTTP(S) and return the response body as text. Requires network permission from the user in normal mode.',
+        'Fetch a URL over HTTP(S) and return the response body as text. In normal mode the user reviews the request before it runs.',
       parameters: {
         type: 'object',
         properties: {
@@ -123,7 +143,8 @@ const DEFINITIONS = {
 
 const PERMISSION_TOOLS = {
   none: ['list_directory', 'read_file'],
-  normal: ['list_directory', 'read_file', 'write_file', 'create_directory', 'delete_path', 'fetch_url'],
+  // 普通权限拥有全部能力，但每次调用都会先经过自动审查 / 用户授权
+  normal: Object.keys(DEFINITIONS),
   full: Object.keys(DEFINITIONS)
 };
 
@@ -164,12 +185,6 @@ function assertReadable(target, ctx) {
 
 function assertWritable(target, ctx) {
   if (ctx.permission === 'none') throw new Error('当前为无权限模式，禁止修改文件');
-  if (ctx.permission === 'normal') {
-    if (!ctx.workspace) throw new Error('普通权限模式需要先选择工作空间');
-    if (!sameOrInside(ctx.workspace, target)) {
-      throw new Error('普通权限模式仅允许修改工作空间内的文件，拒绝写入外部路径');
-    }
-  }
   const roots = [
     path.parse(target).root,
     os.homedir(),
@@ -229,6 +244,14 @@ async function execute(name, args, ctx) {
   }
   const workspace = ctx.workspace || '';
 
+  if (permission === 'normal') {
+    if (typeof ctx.requestApproval !== 'function') {
+      throw new Error('普通权限缺少授权审查回调，已阻止该操作');
+    }
+    const allowed = await ctx.requestApproval({ name, args });
+    if (!allowed) throw new Error('用户拒绝了该操作，请勿重试');
+  }
+
   switch (name) {
     case 'list_directory': {
       const target = resolveTarget(args.path || '.', workspace);
@@ -280,7 +303,6 @@ async function execute(name, args, ctx) {
       return `已删除 ${displayPath(target, workspace)}`;
     }
     case 'run_command': {
-      if (permission !== 'full') throw new Error('执行终端命令需要完全权限');
       const cwd = args.cwd ? resolveTarget(args.cwd, workspace) : workspace || os.homedir();
       const safeCwd = fs.existsSync(cwd) ? cwd : os.homedir();
       return await new Promise((resolve) => {
@@ -307,11 +329,6 @@ async function execute(name, args, ctx) {
         throw new Error('URL 格式不正确');
       }
       if (!/^https?:$/.test(parsed.protocol)) throw new Error('仅支持 http/https 协议');
-      if (permission === 'none') throw new Error('无权限模式禁止联网');
-      if (permission === 'normal') {
-        const ok = await ctx.requestNetwork?.(url);
-        if (!ok) throw new Error('用户拒绝了本次联网请求，请改用已有信息回答');
-      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30000);
       try {
@@ -327,6 +344,17 @@ async function execute(name, args, ctx) {
       } finally {
         clearTimeout(timer);
       }
+    }
+    case 'install_mcp_server': {
+      const mcp = require('./mcp');
+      const server = mcp.addServer({
+        name: args.name,
+        command: args.command,
+        args: args.args,
+        env: args.env,
+        cwd: args.cwd
+      });
+      return `已安装 MCP server「${server.name}」（启动命令：${server.command} ${(server.args || []).join(' ')}）。请前往 设置 → MCP 点击启动。`;
     }
     default:
       throw new Error(`未知工具：${name}`);
