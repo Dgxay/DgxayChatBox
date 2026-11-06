@@ -39,7 +39,7 @@ function buildHeaders(apiKey, protocol, accept = 'text/event-stream', authType =
   const headers = {
     'Content-Type': 'application/json',
     Accept: accept,
-    'User-Agent': 'DgxayChatBox/1.1'
+    'User-Agent': 'DgxayChatBox/1.2'
   };
   const key = apiKey ? String(apiKey).trim() : '';
   const oauth = authType === 'oauth';

@@ -1,4 +1,4 @@
-# DgxayChatBox V1.1
+# DgxayChatBox V1.2
 
 一个简洁、明快的多模型 AI 桌面工作台，基于 Electron 构建。支持三种主流模型协议，在对话模式与工作模式之间切换，并让 AI 在分级权限与自动审查的保护下直接处理本地文件与终端命令。
 
@@ -24,7 +24,7 @@
 
 Base URL 可只填域名（`https://api.anthropic.com`）、带版本前缀（`https://api.openai.com/v1`）或完整端点。工具调用会按协议转换为 `tool_calls` / `tool_use` / `function_call`，三种协议下工作模式行为一致。
 
-## 分级权限（V1.1）
+## 分级权限（V1.2）
 
 | 能力 | 无权限 | 普通权限 | 自动审查 | 完全权限 |
 | --- | --- | --- | --- | --- |
