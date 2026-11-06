@@ -20,7 +20,8 @@ function endpointFor(baseUrl, path) {
   const base = normalizeBaseUrl(baseUrl);
   if (!base) throw new Error('Base URL 不能为空');
   if (base.toLowerCase().endsWith(path.toLowerCase())) return base;
-  if (/\/v\d+$/i.test(base)) return `${base}${path}`;
+  // 已经带版本前缀的根地址（/v1、/v1beta/openai、/v1beta1 等）直接拼端点
+  if (/\/v\d+[a-z0-9]*(?:\/.*)?$/i.test(base)) return `${base}${path}`;
   return `${base}/v1${path}`;
 }
 
@@ -34,19 +35,22 @@ function modelsEndpoint(baseUrl) {
   return endpointFor(baseUrl, '/models');
 }
 
-function buildHeaders(apiKey, protocol, accept = 'text/event-stream') {
+function buildHeaders(apiKey, protocol, accept = 'text/event-stream', authType = 'apiKey') {
   const headers = {
     'Content-Type': 'application/json',
     Accept: accept,
-    'User-Agent': 'DgxayChatBox/1.0'
+    'User-Agent': 'DgxayChatBox/1.1'
   };
   const key = apiKey ? String(apiKey).trim() : '';
+  const oauth = authType === 'oauth';
   if (protocol === 'anthropic') {
     if (key) {
-      headers['x-api-key'] = key;
+      // OAuth 访问令牌只能放在 Authorization，API Key 则走 x-api-key
+      if (!oauth) headers['x-api-key'] = key;
       headers.Authorization = `Bearer ${key}`;
     }
     headers['anthropic-version'] = '2023-06-01';
+    if (oauth) headers['anthropic-beta'] = 'oauth-2025-04-20';
     return headers;
   }
   if (key) headers.Authorization = `Bearer ${key}`;
@@ -146,7 +150,8 @@ async function streamOpenAI(options) {
     stream = true,
     signal,
     onDelta,
-    onReasoning
+    onReasoning,
+    authType = 'apiKey'
   } = options;
 
   const body = {
@@ -163,7 +168,7 @@ async function streamOpenAI(options) {
 
   const res = await fetch(chatEndpoint(baseUrl, 'openai'), {
     method: 'POST',
-    headers: buildHeaders(apiKey, 'openai'),
+    headers: buildHeaders(apiKey, 'openai', 'text/event-stream', options.authType),
     body: JSON.stringify(body),
     signal
   });
@@ -343,7 +348,7 @@ async function streamAnthropic(options) {
 
   const res = await fetch(chatEndpoint(baseUrl, 'anthropic'), {
     method: 'POST',
-    headers: buildHeaders(apiKey, 'anthropic'),
+    headers: buildHeaders(apiKey, 'anthropic', 'text/event-stream', options.authType),
     body: JSON.stringify(body),
     signal
   });
@@ -526,7 +531,7 @@ async function streamResponses(options) {
 
   const res = await fetch(chatEndpoint(baseUrl, 'responses'), {
     method: 'POST',
-    headers: buildHeaders(apiKey, 'responses'),
+    headers: buildHeaders(apiKey, 'responses', 'text/event-stream', options.authType),
     body: JSON.stringify(body),
     signal
   });
@@ -668,10 +673,10 @@ async function streamChat(options) {
   return streamOpenAI(options);
 }
 
-async function listModels({ baseUrl, apiKey, protocol = 'openai', signal }) {
+async function listModels({ baseUrl, apiKey, protocol = 'openai', signal, authType = 'apiKey' }) {
   const res = await fetch(modelsEndpoint(baseUrl), {
     method: 'GET',
-    headers: buildHeaders(apiKey, protocol, 'application/json'),
+    headers: buildHeaders(apiKey, protocol, 'application/json', authType),
     signal
   });
   if (!res.ok) throw new Error(await readError(res));

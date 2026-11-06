@@ -9,3 +9,4 @@ Thumbs.db
 .deb-build/
 __pycache__/
 scripts/__pycache__/
+.taste-skill/

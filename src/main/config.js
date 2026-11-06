@@ -15,6 +15,7 @@ const CONFIG_PATH = path.join(DCB_DIR, 'config.json');
 const CHATS_PATH = path.join(DCB_DIR, 'chats.json');
 const MCP_PATH = path.join(DCB_DIR, 'mcp.json');
 const SKILLS_DIR = path.join(DCB_DIR, 'skills');
+const OAUTH_PATH = path.join(DCB_DIR, 'oauth.json');
 
 const DEFAULT_CONFIG = {
   version: 1,
@@ -25,7 +26,7 @@ const DEFAULT_CONFIG = {
   ui: {
     mode: 'chat',
     permission: 'normal',
-    accent: 'coral',
+    accent: 'blue',
     fontScale: 1,
     showSidebar: true
   },
@@ -96,6 +97,9 @@ function readConfig() {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     const merged = deepMerge(base, parsed);
+    // 旧版本使用珊瑚色作为主题色，V1.2 起统一为蓝色
+    if (!merged.ui) merged.ui = { ...base.ui };
+    if (!merged.ui.accent || merged.ui.accent === 'coral') merged.ui.accent = 'blue';
     merged.meta = {
       ...merged.meta,
       createdAt: merged.meta?.createdAt || new Date().toISOString(),
@@ -173,6 +177,7 @@ module.exports = {
   CHATS_PATH,
   MCP_PATH,
   SKILLS_DIR,
+  OAUTH_PATH,
   DEFAULT_CONFIG,
   deepMerge,
   hasDcbDir,

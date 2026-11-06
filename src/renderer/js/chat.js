@@ -18,6 +18,7 @@ import {
   recentWorkspaces,
   workspaceLabel,
   PERMISSIONS,
+  availablePermissions,
   providers,
   setActiveModel,
   emit,
@@ -58,16 +59,16 @@ const ASSISTANT_AVATAR = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M
 
 const SUGGESTIONS = {
   chat: [
-    { kind: 'coral', icon: icons.book, title: '写一段产品介绍', desc: '为一款新应用打磨文案', prompt: '帮我写一段有感染力的产品介绍，产品是：' },
-    { kind: 'sky', icon: icons.code, title: '解释一段代码', desc: '看懂逻辑与潜在问题', prompt: '请逐段解释下面这段代码，并指出潜在问题：\n\n```\n\n```' },
-    { kind: 'mint', icon: icons.calendar, title: '规划周末行程', desc: '两天的轻松路线', prompt: '帮我规划一个周末两天的行程，城市是：，偏好：' },
-    { kind: 'amber', icon: icons.pencil, title: '润色这封邮件', desc: '更专业、更得体', prompt: '请帮我润色下面这封邮件，保持原意，语气专业友好：\n\n' }
+    { icon: icons.book, title: '写一段产品介绍', desc: '为一款新应用打磨文案', prompt: '帮我写一段有感染力的产品介绍，产品是：' },
+    { icon: icons.code, title: '解释一段代码', desc: '看懂逻辑与潜在问题', prompt: '请逐段解释下面这段代码，并指出潜在问题：\n\n```\n\n```' },
+    { icon: icons.calendar, title: '规划周末行程', desc: '两天的轻松路线', prompt: '帮我规划一个周末两天的行程，城市是：，偏好：' },
+    { icon: icons.pencil, title: '润色这封邮件', desc: '更专业、更得体', prompt: '请帮我润色下面这封邮件，保持原意，语气专业友好：\n\n' }
   ],
   work: [
-    { kind: 'coral', icon: icons.folder, title: '整理这个文件夹', desc: '归类、重命名，生成索引', prompt: '帮我整理当前工作空间：先浏览目录结构，再给出整理方案，最后按方案重命名或归类文件，并生成一份索引。' },
-    { kind: 'amber', icon: icons.book, title: '生成一份周报', desc: '读取记录并汇总输出', prompt: '请阅读工作空间里的工作记录，汇总生成一份本周周报，保存为 markdown 文件。' },
-    { kind: 'sky', icon: icons.code, title: '分析代码结构', desc: '输出模块说明文档', prompt: '分析当前工作空间的代码结构，说明主要模块的职责与依赖关系，并生成一份 ARCHITECTURE.md。' },
-    { kind: 'mint', icon: icons.terminal, title: '批量处理文件', desc: '写个脚本并执行', prompt: '先列出工作空间里的文件，然后写一个脚本完成批量处理（具体需求：），保存脚本并执行。' }
+    { icon: icons.folder, title: '整理这个文件夹', desc: '归类、重命名，生成索引', prompt: '帮我整理当前工作空间：先浏览目录结构，再给出整理方案，最后按方案重命名或归类文件，并生成一份索引。' },
+    { icon: icons.book, title: '生成一份周报', desc: '读取记录并汇总输出', prompt: '请阅读工作空间里的工作记录，汇总生成一份本周周报，保存为 markdown 文件。' },
+    { icon: icons.code, title: '分析代码结构', desc: '输出模块说明文档', prompt: '分析当前工作空间的代码结构，说明主要模块的职责与依赖关系，并生成一份 ARCHITECTURE.md。' },
+    { icon: icons.terminal, title: '批量处理文件', desc: '写个脚本并执行', prompt: '先列出工作空间里的文件，然后写一个脚本完成批量处理（具体需求：），保存脚本并执行。' }
   ]
 };
 
@@ -163,7 +164,7 @@ export function refreshChrome() {
   const mode = currentMode();
   const chip = $('#modeChip');
   chip.dataset.mode = mode;
-  chip.textContent = mode === 'work' ? '工作模式' : '对话模式';
+  chip.textContent = mode === 'work' ? '工作' : '对话';
 
   const hintText = $('#modeHintText');
   if (hintText) hintText.textContent = mode === 'work' ? '工作模式' : '对话模式';
@@ -172,8 +173,8 @@ export function refreshChrome() {
 
   inputEl.placeholder =
     mode === 'work'
-      ? '描述你希望 AI 完成的工作，输入 ! 执行终端命令，/ 打开命令'
-      : '输入消息，输入 ! 执行终端命令，/ 打开命令';
+      ? '描述任务，AI 会连续执行直到完成'
+      : '给 DgxayChatBox 发送消息';
 
   document.body.dataset.mode = mode;
   updateComposerHint();
@@ -273,27 +274,24 @@ function renderThread() {
 
 function heroHtml() {
   const mode = currentMode();
-  const hour = new Date().getHours();
-  const greet = hour < 6 ? '夜深了' : hour < 11 ? '早上好' : hour < 14 ? '中午好' : hour < 19 ? '下午好' : '晚上好';
   const model = activeModel();
   const perm = PERMISSIONS[currentPermission()];
 
-  const title =
-    mode === 'work' ? `让 AI 直接<em>动手做事</em>。` : `${greet}，今天<em>想做点什么</em>？`;
+  const title = mode === 'work' ? '把一件事完整交给 AI' : '今天想聊些什么？';
   const sub =
     mode === 'work'
       ? currentWorkspace()
-        ? `工作空间 ${workspaceLabel(currentWorkspace())} · ${perm.label}。生成的文件都会保存在这里。`
+        ? `工作空间 ${workspaceLabel(currentWorkspace())} · ${perm.label}`
         : '先在下方选择一个文件夹作为工作空间，AI 生成的文件都会存放在那里。'
       : model
-        ? `已连接 ${escapeHtml(model.name)}。提问、写作、分析，或者只是聊聊。`
+        ? `${model.name} · ${model.providerName}`
         : '还没有配置模型，先去设置里连接一个吧。';
 
   const cards = (SUGGESTIONS[mode] || SUGGESTIONS.chat)
     .map(
       (item) => `
       <button class="suggest" data-prompt="${escapeHtml(item.prompt)}">
-        <span class="s-icon s-${item.kind}">${item.icon}</span>
+        <span class="s-icon">${item.icon}</span>
         <span>
           <span class="s-title">${item.title}</span>
           <span class="s-desc">${item.desc}</span>
@@ -304,14 +302,11 @@ function heroHtml() {
 
   return `
     <div class="hero">
-      <div class="hero-kicker"><span class="dot"></span>${mode === 'work' ? 'WORK MODE' : 'READY'}</div>
       <h1>${title}</h1>
       <p>${sub}</p>
       <div class="suggests">${cards}</div>
       <div class="hero-foot">
-        <span>${model ? escapeHtml(model.providerName) : '未配置供应商'}</span>
-        <span class="sep"></span>
-        <span>${model ? escapeHtml(model.id) : '前往设置添加'}</span>
+        <span>${mode === 'work' ? '任务会连续执行，直到完成或需要你授权' : '输入 / 打开命令，输入 ! 执行终端命令'}</span>
       </div>
     </div>
   `;
@@ -500,7 +495,19 @@ function refreshWorkBar() {
     : `<span class="wb-empty">尚未选择工作空间</span>`;
 
   const perm = currentPermission();
-  $('#permList').querySelectorAll('button').forEach((btn) => {
+  const permListEl = $('#permList');
+  const entries = availablePermissions();
+  const signature = entries.join(',');
+  if (permListEl.dataset.signature !== signature) {
+    permListEl.dataset.signature = signature;
+    permListEl.innerHTML = entries
+      .map((id) => {
+        const meta = PERMISSIONS[id];
+        return `<button type="button" data-perm="${id}" role="radio" title="${escapeHtml(meta.desc)}">${meta.label}</button>`;
+      })
+      .join('');
+  }
+  permListEl.querySelectorAll('button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.perm === perm);
     btn.setAttribute('aria-checked', String(btn.dataset.perm === perm));
   });
@@ -1073,6 +1080,7 @@ async function runTerminal(rawCommand) {
 
   renderThread();
   refreshSidebar();
+  refreshHeader();
   scrollToBottom();
   scheduleChatSave();
 
@@ -1115,6 +1123,9 @@ function handleTerminalEvent(event) {
       break;
     case 'review-start':
       message.status = 'reviewing';
+      break;
+    case 'waiting':
+      message.status = 'waiting';
       break;
     case 'review':
       if (event.decision === 'allow') {

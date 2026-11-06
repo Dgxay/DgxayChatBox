@@ -64,7 +64,7 @@ function renderStepOne() {
       <div class="protocol-grid" id="obProtocols">${protocolCardsHtml(draft.protocol)}</div>
     </div>
 
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 16px">
+    <div class="ob-presets">
       ${PRESETS.map(
         (preset) =>
           `<button type="button" class="fetched-chip" data-preset="${escapeHtml(preset.baseUrl)}" data-name="${escapeHtml(preset.name)}" data-protocol="${preset.protocol}">${escapeHtml(preset.name)}</button>`
