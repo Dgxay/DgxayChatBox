@@ -20,6 +20,7 @@ const { streamChat, listModels } = require('./llm');
 const tools = require('./tools');
 const mcp = require('./mcp');
 const skills = require('./skills');
+const oauth = require('./oauth');
 
 const isDev = process.argv.includes('--dev');
 let mainWindow = null;
@@ -49,7 +50,7 @@ function createWindow() {
     minHeight: 660,
     show: false,
     frame: process.platform === 'darwin',
-    backgroundColor: '#F7F4EE',
+    backgroundColor: '#F7F7F5',
     title: 'DgxayChatBox',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     trafficLightPosition: { x: 16, y: 18 },
@@ -195,12 +196,17 @@ function systemPromptFor({ mode, permission, workspace, customPrompt, skill }) {
   if (permission === 'none') {
     parts.push(
       '权限级别：无权限。你只能以只读方式访问工作空间内的文件，禁止修改/创建/删除文件，禁止联网，禁止执行命令。' +
-        '如果用户要求写入文件、联网或执行命令，请说明需要切换到「普通权限」或「完全权限」。'
+        '如果用户要求写入文件、联网或执行命令，请说明需要切换到「普通权限」「自动审查」或「完全权限」。'
     );
   } else if (permission === 'normal') {
     parts.push(
       '权限级别：普通权限。你拥有全部能力：可以读写任意文件、执行终端命令、访问网络。' +
-        '但每一次工具调用都会先由自动审查模型判断风险，可疑操作会转交用户确认；如果用户拒绝，不要重试，改用已经获得的信息回答。'
+        '但每一次工具调用或终端命令都会先弹出授权请求，必须由用户点击允许后才能执行；如果用户拒绝，不要重试，改用已经获得的信息回答。'
+    );
+  } else if (permission === 'auto') {
+    parts.push(
+      '权限级别：自动审查。你拥有全部能力：可以读写任意文件、执行终端命令、访问网络。' +
+        '每一次操作会先由自动审查模型判断风险，安全操作自动放行，可疑操作转交用户确认；如果被拒绝，不要重试。'
     );
   } else {
     parts.push(
@@ -218,7 +224,15 @@ function systemPromptFor({ mode, permission, workspace, customPrompt, skill }) {
         '工作模式规则：',
         '1. 需要查看或修改文件时，必须调用工具，不要凭空假设文件内容；修改前先 read_file。',
         '2. 所有生成的文件必须保存到工作空间内，优先使用相对路径。',
-        '3. 完成任务后用简短的中文总结你创建/修改了哪些文件。'
+        '3. 完成任务后用简短的中文总结你创建/修改了哪些文件。',
+        '',
+        '【任务执行纪律】',
+        '• 收到目标后先拆成可执行步骤，然后立刻调用工具开始执行。禁止只输出计划、承诺或“接下来我会…”。',
+        '• 在任务真正完成之前不得停止，也不要等待用户说“继续”。每次工具返回后自动进入下一步，直到所有步骤都完成。',
+        '• 需要多次读写、多个文件或多个命令时，连续执行完再结束；不要做完一步就交差。',
+        '• 工具报错时先分析原因并换一种方式重试；只有缺少必要信息、权限被拒绝或任务确实无法继续时才可停下，并说明具体阻塞点。',
+        '• 结束前做一次验证：重新读取关键文件、检查命令输出或运行必要测试。',
+        '• 全部完成后，再用简短列表报告已完成内容与验证结果。未完成时禁止输出结束语或“如需继续请告诉我”。'
       ].join('\n')
     );
   } else {
@@ -281,10 +295,12 @@ async function reviewOperation({ config, providerId, kind, name, args, command, 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
   try {
+    const reviewerAuth = await resolveProviderAuth(reviewer.provider);
     const result = await streamChat({
       protocol: reviewer.provider.protocol || 'openai',
       baseUrl: reviewer.provider.baseUrl,
-      apiKey: reviewer.provider.apiKey,
+      apiKey: reviewerAuth.apiKey,
+      authType: reviewerAuth.authType,
       model: reviewer.modelId,
       messages: [
         { role: 'system', content: REVIEW_SYSTEM },
@@ -392,11 +408,31 @@ async function requestOperationApproval({
   notify
 }) {
   if (permission === 'full') return { allow: true, source: 'full', review: null };
-  if (permission !== 'normal') {
+  if (permission !== 'normal' && permission !== 'auto') {
     return { allow: false, source: 'none', review: null, reason: '当前权限禁止该操作' };
   }
 
   const config = cfg.readConfig();
+
+  // 普通权限：不经过模型，每一次操作都由用户直接确认
+  if (permission === 'normal') {
+    notify?.({ type: 'waiting', toolId, name, kind, permission });
+    const direct = await askUserApproval({
+      kind,
+      permission,
+      title: kind === 'terminal' ? 'AI 请求执行终端命令' : 'AI 请求执行操作',
+      operation: name,
+      detail: describeOperation({ kind, name, args, command }),
+      command: command || '',
+      workspace: workspace || '',
+      review: '',
+      reviewer: '',
+      reviewModel: ''
+    });
+    return { allow: direct.allow, source: 'user', review: null, reason: direct.reason };
+  }
+
+  // 自动审查：先由审查模型判断，可疑操作再交给用户
   notify?.({ type: 'review-start', toolId, name, kind });
   const review = await reviewOperation({
     config,
@@ -424,6 +460,7 @@ async function requestOperationApproval({
 
   const user = await askUserApproval({
     kind,
+    permission,
     title: kind === 'terminal' ? 'AI 请求执行终端命令' : 'AI 请求执行操作',
     operation: name,
     detail: describeOperation({ kind, name, args, command }),
@@ -437,6 +474,24 @@ async function requestOperationApproval({
   return { allow: user.allow, source: 'user', review, reason: user.reason };
 }
 
+function looksUnfinishedWork(result, toolLog) {
+  const text = String(result?.content || '').trim();
+  if (result?.finishReason === 'length') return true;
+  if (!text) return true;
+  const tail = text.slice(-520);
+  return /(我(将|会|马上|这就|现在)(继续|开始|去|来|处理|执行|写入|创建|生成|读取|检查|整理)|接下来(我)?(会|将|继续|需要)|下一步(我)?(会|将)|稍后(会|将|再)|let me (now )?(proceed|continue|start|check)|i(?:'|’)ll (now )?(proceed|continue|start|check|write)|next,? i (?:will|'ll))/i.test(
+    tail
+  );
+}
+
+async function resolveProviderAuth(provider) {
+  if (provider?.authMode === 'oauth' && provider.oauthProvider) {
+    const token = await oauth.getAccessToken(provider.oauthProvider);
+    return { apiKey: token, authType: 'oauth' };
+  }
+  return { apiKey: provider?.apiKey || '', authType: 'apiKey' };
+}
+
 ipcMain.handle('app:init', () => {
   const config = cfg.readConfig();
   return {
@@ -445,7 +500,7 @@ ipcMain.handle('app:init', () => {
     onboarded: Boolean(config.onboarded && config.providers?.length),
     version: app.getVersion(),
     platform: process.platform,
-    paths: { dataDir: cfg.DCB_DIR, config: cfg.CONFIG_PATH, mcp: cfg.MCP_PATH, skills: cfg.SKILLS_DIR },
+    paths: { dataDir: cfg.DCB_DIR, config: cfg.CONFIG_PATH, mcp: cfg.MCP_PATH, skills: cfg.SKILLS_DIR, oauth: cfg.OAUTH_PATH },
     darkMode: nativeTheme.shouldUseDarkColors
   };
 });
@@ -501,11 +556,17 @@ ipcMain.handle('shell:showItem', (_event, target) => {
   return true;
 });
 
-ipcMain.handle('models:fetch', async (_event, { baseUrl, apiKey, protocol }) => {
+ipcMain.handle('models:fetch', async (_event, { baseUrl, apiKey, protocol, authMode, oauthProvider }) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    return await listModels({ baseUrl, apiKey, protocol, signal: controller.signal });
+    let token = apiKey;
+    let authType = 'apiKey';
+    if (authMode === 'oauth' && oauthProvider) {
+      token = await oauth.getAccessToken(oauthProvider);
+      authType = 'oauth';
+    }
+    return await listModels({ baseUrl, apiKey: token, protocol, authType, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -525,10 +586,12 @@ ipcMain.handle('chat:compress', async (_event, payload = {}) => {
     .join('\n\n')
     .slice(-150000);
 
+  const providerAuth = await resolveProviderAuth(provider);
   const result = await streamChat({
     protocol: provider.protocol || 'openai',
     baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
+    apiKey: providerAuth.apiKey,
+    authType: providerAuth.authType,
     model: modelId,
     messages: [
       {
@@ -670,7 +733,7 @@ function runTerminalCommand({ requestId, command, cwd, emit }) {
 ipcMain.handle('terminal:run', async (event, payload = {}) => {
   const requestId = String(payload.requestId || `term_${Date.now()}`);
   const config = cfg.readConfig();
-  const permission = ['none', 'normal', 'full'].includes(config.ui?.permission)
+  const permission = ['none', 'normal', 'auto', 'full'].includes(config.ui?.permission)
     ? config.ui.permission
     : 'normal';
   const command = String(payload.command || '').trim();
@@ -699,7 +762,7 @@ ipcMain.handle('terminal:run', async (event, payload = {}) => {
   }
   const cwd = workspace || os.homedir();
 
-  if (permission === 'normal') {
+  if (permission === 'normal' || permission === 'auto') {
     const approval = await requestOperationApproval({
       kind: 'terminal',
       name: 'run_terminal',
@@ -725,6 +788,14 @@ ipcMain.handle('terminal:abort', (_event, requestId) => {
   killProcessTree(entry.child);
   return true;
 });
+
+ipcMain.handle('oauth:list', () => oauth.listProviders());
+ipcMain.handle('oauth:save-client', (_event, { provider, ...patch }) => oauth.saveClient(provider, patch));
+ipcMain.handle('oauth:begin', (_event, input) => oauth.begin(input || {}));
+ipcMain.handle('oauth:wait', (_event, id) => oauth.wait(id));
+ipcMain.handle('oauth:complete', (_event, { id, code }) => oauth.complete(id, code));
+ipcMain.handle('oauth:cancel', (_event, id) => oauth.cancel(id));
+ipcMain.handle('oauth:disconnect', (_event, id) => oauth.disconnect(id));
 
 ipcMain.handle('shortcut:status', () => ({
   registered: Boolean(currentGlobalShortcut),
@@ -771,7 +842,9 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
   if (!modelId) throw new Error('该供应商下没有可用模型，请先在设置中添加模型');
 
   const mode = payload.mode === 'work' ? 'work' : 'chat';
-  const permission = ['none', 'normal', 'full'].includes(payload.permission) ? payload.permission : 'normal';
+  const permission = ['none', 'normal', 'auto', 'full'].includes(payload.permission)
+    ? payload.permission
+    : 'normal';
   let workspace = typeof payload.workspace === 'string' ? payload.workspace.trim() : '';
   if (workspace) {
     try {
@@ -812,6 +885,7 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
   };
 
   const settings = config.chat || {};
+  const providerAuth = await resolveProviderAuth(provider);
   let finalText = '';
   let reasoningText = '';
   let totalUsage = null;
@@ -820,12 +894,16 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
   let aborted = false;
 
   try {
-    for (let step = 0; step < 8; step += 1) {
+    const maxSteps = mode === 'work' && useTools ? 24 : 8;
+    let continuationCount = 0;
+
+    for (let step = 0; step < maxSteps; step += 1) {
       emit('status', { text: step === 0 ? '正在生成' : '正在继续处理' });
       const result = await streamChat({
         protocol: provider.protocol || 'openai',
         baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey,
+        apiKey: providerAuth.apiKey,
+        authType: providerAuth.authType,
         model: modelId,
         messages: apiMessages,
         tools: toolDefs,
@@ -926,6 +1004,31 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
           finalText += '\n\n';
           emit('delta', { text: '\n\n' });
         }
+        continue;
+      }
+
+      // 工作模式：模型提前收尾时自动推进一步，避免任务只做了一半
+      if (
+        mode === 'work' &&
+        useTools &&
+        continuationCount < 2 &&
+        step < maxSteps - 1 &&
+        looksUnfinishedWork(result, toolLog)
+      ) {
+        continuationCount += 1;
+        if (result.content) {
+          apiMessages.push({ role: 'assistant', content: result.content });
+        }
+        apiMessages.push({
+          role: 'user',
+          content:
+            '继续执行，直到任务全部完成。不要只描述计划或承诺下一步，直接调用工具完成剩余步骤；完成后先验证结果，再给出简短总结。'
+        });
+        if (finalText) {
+          finalText += '\n\n';
+          emit('delta', { text: '\n\n' });
+        }
+        emit('status', { text: '正在继续完成任务' });
         continue;
       }
 

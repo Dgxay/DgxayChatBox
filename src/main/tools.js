@@ -143,8 +143,9 @@ const DEFINITIONS = {
 
 const PERMISSION_TOOLS = {
   none: ['list_directory', 'read_file'],
-  // 普通权限拥有全部能力，但每次调用都会先经过自动审查 / 用户授权
+  // 普通权限与自动审查都拥有全部能力，区别在授权流程由 main.js 决定
   normal: Object.keys(DEFINITIONS),
+  auto: Object.keys(DEFINITIONS),
   full: Object.keys(DEFINITIONS)
 };
 
@@ -244,9 +245,9 @@ async function execute(name, args, ctx) {
   }
   const workspace = ctx.workspace || '';
 
-  if (permission === 'normal') {
+  if (permission === 'normal' || permission === 'auto') {
     if (typeof ctx.requestApproval !== 'function') {
-      throw new Error('普通权限缺少授权审查回调，已阻止该操作');
+      throw new Error('当前权限缺少授权回调，已阻止该操作');
     }
     const allowed = await ctx.requestApproval({ name, args });
     if (!allowed) throw new Error('用户拒绝了该操作，请勿重试');

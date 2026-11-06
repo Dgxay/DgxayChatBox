@@ -125,7 +125,12 @@ export const PERMISSIONS = {
   normal: {
     label: '普通权限',
     short: '普通',
-    desc: '拥有全部能力，每次操作先由审查模型判断，可疑操作转交你确认'
+    desc: '拥有全部能力，但每次操作都需要你确认'
+  },
+  auto: {
+    label: '自动审查',
+    short: '审查',
+    desc: '拥有全部能力，先由审查模型判断，可疑操作再询问你'
   },
   full: {
     label: '完全权限',
@@ -134,8 +139,28 @@ export const PERMISSIONS = {
   }
 };
 
+export function hasReviewModel() {
+  const usable = (provider) =>
+    Boolean(provider?.reviewModelId) &&
+    Array.isArray(provider?.models) &&
+    provider.models.some((model) => model.id === provider.reviewModelId);
+  // 与主进程一致：优先当前供应商，未配置时回退到第一个（默认）供应商
+  const current = activeProvider();
+  if (usable(current)) return true;
+  return usable(providers()[0]);
+}
+
+export function availablePermissions() {
+  const list = ['none', 'normal'];
+  if (hasReviewModel()) list.push('auto');
+  list.push('full');
+  return list;
+}
+
 export function currentPermission() {
-  return state.config?.ui?.permission || 'normal';
+  const value = state.config?.ui?.permission || 'normal';
+  if (value === 'auto' && !hasReviewModel()) return 'normal';
+  return PERMISSIONS[value] ? value : 'normal';
 }
 
 export function currentMode() {

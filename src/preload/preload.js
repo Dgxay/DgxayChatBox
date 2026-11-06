@@ -27,6 +27,14 @@ contextBridge.exposeInMainWorld('dcb', {
   listSkills: () => ipcRenderer.invoke('skills:list'),
   compressContext: (payload) => ipcRenderer.invoke('chat:compress', payload),
 
+  oauthList: () => ipcRenderer.invoke('oauth:list'),
+  oauthSaveClient: (payload) => ipcRenderer.invoke('oauth:save-client', payload),
+  oauthBegin: (payload) => ipcRenderer.invoke('oauth:begin', payload),
+  oauthWait: (id) => ipcRenderer.invoke('oauth:wait', id),
+  oauthComplete: (payload) => ipcRenderer.invoke('oauth:complete', payload),
+  oauthCancel: (id) => ipcRenderer.invoke('oauth:cancel', id),
+  oauthDisconnect: (id) => ipcRenderer.invoke('oauth:disconnect', id),
+
   terminalRun: (payload) => ipcRenderer.invoke('terminal:run', payload),
   terminalAbort: (requestId) => ipcRenderer.invoke('terminal:abort', requestId),
   onTerminalEvent: (cb) => subscribe('terminal:event', cb),

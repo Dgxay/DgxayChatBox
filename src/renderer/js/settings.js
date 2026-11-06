@@ -4,6 +4,7 @@ import {
   activeProvider,
   activeModel,
   patchConfig,
+  currentPermission,
   setActiveModel,
   emit,
   on,
@@ -22,6 +23,10 @@ const TABS = {
   shortcuts: {
     title: '快捷键',
     desc: '为常用操作绑定顺手的组合键。点击按键框后直接按下新的组合键即可。'
+  },
+  oauth: {
+    title: '账户连接',
+    desc: '用 OAuth 连接 OpenAI、Anthropic、xAI 与 Google 账户。令牌只保存在本机，可随时断开。'
   },
   mcp: {
     title: 'MCP Server',
@@ -106,6 +111,7 @@ function renderTab(tab) {
   $('#setDesc').textContent = TABS[tab].desc;
 
   if (tab === 'providers') renderProviders();
+  else if (tab === 'oauth') renderOauth();
   else if (tab === 'shortcuts') renderShortcuts();
   else if (tab === 'mcp') renderMcp();
   else if (tab === 'general') renderGeneral();
@@ -127,7 +133,7 @@ function renderProviders() {
         ? (models.find((model) => model.id === provider.reviewModelId)?.name || provider.reviewModelId)
         : providerIndex === 0
           ? '未配置'
-          : '默认供应商';
+          : '默认审查模型';
       return `
       <div class="card" data-provider="${provider.id}">
         <div class="card-head">
@@ -159,8 +165,13 @@ function renderProviders() {
         </div>
         <div class="provider-meta">
           <span>协议：<b>${escapeHtml(protocolMeta(provider.protocol).full)}</b></span>
+          <span>认证：<b>${
+            provider.authMode === 'oauth'
+              ? `OAuth · ${escapeHtml(oauthProviderName(provider.oauthProvider))}`
+              : 'API Key'
+          }</b></span>
           <span>审查模型：<b>${escapeHtml(reviewLabel)}</b></span>
-          <span>API Key：<b>${escapeHtml(maskKey(provider.apiKey))}</b></span>
+          <span>API Key：<b>${provider.authMode === 'oauth' ? '使用 OAuth 账户' : escapeHtml(maskKey(provider.apiKey))}</b></span>
           <span>模型：<b>${models.length}</b> 个</span>
         </div>
       </div>`;
@@ -209,6 +220,11 @@ function renderProviders() {
   });
 }
 
+function oauthProviderName(id) {
+  const names = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', google: 'Google' };
+  return names[id] || id || '未选择';
+}
+
 function maskKey(key) {
   if (!key) return '未填写（可留空）';
   const str = String(key);
@@ -252,14 +268,19 @@ function refreshReviewSelect(bodyEl, preferred) {
   if (unique.some((model) => model.id === current)) select.value = current;
 }
 
-function openProviderEditor(provider) {
+async function openProviderEditor(provider) {
   const editing = Boolean(provider);
   const draft = provider
     ? JSON.parse(JSON.stringify(provider))
     : { id: uid('prov'), name: '', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: [] };
   draft.protocol = protocolOf(draft.protocol);
+  draft.authMode = draft.authMode === 'oauth' ? 'oauth' : 'apiKey';
   if (!draft.models?.length) draft.models = [{ id: '', name: '' }];
   let selectedProtocol = draft.protocol;
+
+  const oauthProviders = await loadOAuthProviders(true).catch(() => []);
+  const connectedOauth = oauthProviders.filter((item) => item.connection && !item.connection.expired);
+  if (!draft.oauthProvider) draft.oauthProvider = connectedOauth[0]?.id || '';
 
   const protocolMetaInfo = PROTOCOLS[draft.protocol];
   const reviewModels = draft.models.filter((model) => model.id);
@@ -278,11 +299,39 @@ function openProviderEditor(provider) {
       <p class="input-hint" id="pvBaseHint">${escapeHtml(protocolMetaInfo.hint)}</p>
     </div>
     <div class="field">
+      <label>认证方式</label>
+      <select class="input" id="pvAuthMode">
+        <option value="apiKey" ${draft.authMode === 'apiKey' ? 'selected' : ''}>API Key</option>
+        <option value="oauth" ${draft.authMode === 'oauth' ? 'selected' : ''}>OAuth 账户</option>
+      </select>
+    </div>
+    <div class="field" id="pvKeyWrap" ${draft.authMode === 'oauth' ? 'hidden' : ''}>
       <label>API Key <span class="hint">仅保存在本地</span></label>
       <div style="display:flex;gap:8px">
         <input class="input mono" id="pvKey" type="password" value="${escapeHtml(draft.apiKey)}" placeholder="sk-..." spellcheck="false" style="flex:1" />
         <button class="btn" type="button" id="pvReveal">显示</button>
       </div>
+    </div>
+    <div class="field" id="pvOauthWrap" ${draft.authMode === 'oauth' ? '' : 'hidden'}>
+      <label>OAuth 账户 <span class="hint">在「账户连接」中授权</span></label>
+      <select class="input" id="pvOauthAccount">
+        ${oauthProviders
+          .map(
+            (item) =>
+              `<option value="${item.id}" ${
+                item.connection && !item.connection.expired ? '' : 'disabled'
+              } ${draft.oauthProvider === item.id ? 'selected' : ''}>${escapeHtml(item.name)}${
+                item.connection ? ` · ${escapeHtml(item.connection.account || '已连接')}` : '（未连接）'
+              }</option>`
+          )
+          .join('')}
+      </select>
+      <p class="input-hint" id="pvOauthHint">${
+        connectedOauth.length
+          ? '请求时使用该账户的访问令牌，过期会自动刷新。'
+          : '还没有可用账户。请先打开「账户连接」完成授权，或改用 API Key。'
+      }</p>
+      <button class="btn btn-sm" type="button" id="pvOauthManage">管理账户连接</button>
     </div>
     <div class="field">
       <label>自动审查模型 <span class="hint">未配置时使用默认供应商</span></label>
@@ -328,9 +377,11 @@ function openProviderEditor(provider) {
           const errEl = $('#pvErr');
           const name = $('#pvName').value.trim() || '我的供应商';
           const baseUrl = $('#pvBase').value.trim().replace(/\/+$/, '');
-          const apiKey = $('#pvKey').value.trim();
           const protocol = protocolOf(selectedProtocol);
           const reviewModelId = $('#pvReview').value;
+          const authMode = $('#pvAuthMode').value === 'oauth' ? 'oauth' : 'apiKey';
+          const oauthProvider = authMode === 'oauth' ? $('#pvOauthAccount').value : '';
+          const apiKey = authMode === 'apiKey' ? $('#pvKey').value.trim() : draft.apiKey || '';
           const models = $$('#pvModels .model-row')
             .map((row) => ({
               id: row.querySelector('[data-field="id"]').value.trim(),
@@ -348,6 +399,13 @@ function openProviderEditor(provider) {
             errEl.textContent = '请至少添加一个模型 ID';
             return false;
           }
+          if (authMode === 'oauth') {
+            const account = oauthProviders.find((item) => item.id === oauthProvider);
+            if (!account?.connection || account.connection.expired) {
+              errEl.textContent = '该账户尚未连接或登录已过期，请先到「账户连接」重新授权';
+              return false;
+            }
+          }
           const unique = [];
           models.forEach((m) => {
             if (!unique.find((u) => u.id === m.id)) unique.push(m);
@@ -355,10 +413,22 @@ function openProviderEditor(provider) {
 
           const next = providers().map((p) =>
             p.id === draft.id
-              ? { ...p, name, protocol, baseUrl, apiKey, reviewModelId, models: unique }
+              ? { ...p, name, protocol, baseUrl, apiKey, authMode, oauthProvider, reviewModelId, models: unique }
               : p
           );
-          if (!editing) next.push({ id: draft.id, name, protocol, baseUrl, apiKey, reviewModelId, models: unique });
+          if (!editing) {
+            next.push({
+              id: draft.id,
+              name,
+              protocol,
+              baseUrl,
+              apiKey,
+              authMode,
+              oauthProvider,
+              reviewModelId,
+              models: unique
+            });
+          }
 
           const patch = { providers: next };
           if (!editing && !state.config.activeProviderId) {
@@ -374,7 +444,20 @@ function openProviderEditor(provider) {
         }
       }
     ],
-    onMount: (bodyEl) => {
+    onMount: (bodyEl, close) => {
+      const authModeSelect = bodyEl.querySelector('#pvAuthMode');
+      const authSync = () => {
+        const oauth = authModeSelect.value === 'oauth';
+        bodyEl.querySelector('#pvKeyWrap').hidden = oauth;
+        bodyEl.querySelector('#pvOauthWrap').hidden = !oauth;
+      };
+      authModeSelect.addEventListener('change', authSync);
+      authSync();
+      bodyEl.querySelector('#pvOauthManage').addEventListener('click', () => {
+        close(null);
+        openSettings('oauth');
+      });
+
       const protocolGrid = bodyEl.querySelector('#pvProtocols');
       protocolGrid.addEventListener('click', (event) => {
         const card = event.target.closest('[data-protocol]');
@@ -433,12 +516,17 @@ function openProviderEditor(provider) {
         const hint = bodyEl.querySelector('#pvFetchHint');
         const fetched = bodyEl.querySelector('#pvFetched');
         const baseUrl = bodyEl.querySelector('#pvBase').value.trim();
-        const apiKey = bodyEl.querySelector('#pvKey').value.trim();
         btn.disabled = true;
         hint.textContent = '正在连接…';
         fetched.innerHTML = '';
         try {
-          const models = await window.dcb.fetchModels({ baseUrl, apiKey, protocol: selectedProtocol });
+          const models = await window.dcb.fetchModels({
+            baseUrl,
+            apiKey: bodyEl.querySelector('#pvKey').value.trim(),
+            protocol: selectedProtocol,
+            authMode: bodyEl.querySelector('#pvAuthMode').value,
+            oauthProvider: bodyEl.querySelector('#pvOauthAccount').value
+          });
           hint.textContent = models.length ? `发现 ${models.length} 个模型，点击添加` : '没有返回模型';
           fetched.innerHTML = models
             .slice(0, 60)
@@ -496,6 +584,245 @@ async function removeProvider(provider) {
   renderProviders();
   refreshChrome();
   toast('供应商已删除');
+}
+
+/* ------------------------------ OAuth 账户 ------------------------------ */
+
+let oauthCache = null;
+
+async function loadOAuthProviders(force = false) {
+  if (oauthCache && !force) return oauthCache;
+  try {
+    oauthCache = await window.dcb.oauthList();
+  } catch {
+    oauthCache = [];
+  }
+  return oauthCache;
+}
+
+function formatExpiry(ts) {
+  if (!ts) return '长期有效';
+  const d = new Date(ts);
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function oauthCard(provider) {
+  const connection = provider.connection;
+  const connected = Boolean(connection);
+  const expired = Boolean(connection?.expired);
+  const state = expired ? '已过期' : connected ? '已连接' : '未连接';
+  return `<div class="oauth-card ${connected && !expired ? 'connected' : ''}" data-oauth="${provider.id}">
+    <div class="oauth-top">
+      <span class="oauth-mark">${escapeHtml(provider.name.slice(0, 1))}</span>
+      <div>
+        <div class="oauth-name">${escapeHtml(provider.name)}</div>
+        <div class="oauth-sub">${escapeHtml(provider.subtitle)}</div>
+      </div>
+      <span class="oauth-state ${connected && !expired ? 'on' : ''}">${state}</span>
+    </div>
+    ${
+      connected
+        ? `<div class="oauth-account" title="${escapeHtml(connection.account || '')}">${escapeHtml(
+            connection.account || '已连接账户'
+          )}</div>
+           <div class="oauth-expiry">${
+             expired ? '登录已过期，请重新连接' : `有效期至 ${formatExpiry(connection.expiresAt)}`
+           }</div>`
+        : `<div class="oauth-hint">${escapeHtml(provider.hint)}</div>`
+    }
+    <div class="oauth-actions">
+      <button class="btn ${connected ? '' : 'btn-primary'}" data-oauth-act="connect">
+        ${connected ? '重新授权' : '连接'}
+      </button>
+      ${connected ? '<button class="btn btn-danger" data-oauth-act="disconnect">断开</button>' : ''}
+      <span class="hint" style="margin-left:auto;font-size:9.5px">${provider.redirectMode === 'manual' ? '手动授权码' : '系统浏览器'}</span>
+    </div>
+  </div>`;
+}
+
+async function renderOauth() {
+  const body = $('#setBody');
+  body.innerHTML = `<div class="card"><div class="card-title">正在读取账户连接…</div></div>`;
+  const list = await loadOAuthProviders(true);
+  if (currentTab !== 'oauth') return;
+
+  body.innerHTML = `
+    <div class="oauth-note">
+      ${icons.shield}
+      <div><b>授权在你的系统浏览器中完成。</b> 令牌保存在本机（优先使用系统加密），不会上传到 DgxayChatBox 的服务器。连接后可在供应商的「认证方式」中选择对应账户；若平台限制订阅令牌推理，可随时切回 API Key。</div>
+    </div>
+    <div class="oauth-grid">${list.map(oauthCard).join('')}</div>
+    <div class="card">
+      <div class="card-title">关于 OAuth 客户端</div>
+      <p class="sr-desc" style="margin:6px 0 0">OpenAI、Anthropic 与 xAI 预置了公开桌面客户端，可直接连接。Google 需要在 Google Cloud Console 创建「桌面应用」OAuth 客户端，并把 Client ID 填入连接窗口。端点与权限范围都可以在连接窗口的高级设置里调整。</p>
+    </div>
+  `;
+
+  $$('#setBody [data-oauth]').forEach((card) => {
+    const provider = list.find((item) => item.id === card.dataset.oauth);
+    if (!provider) return;
+    card.querySelector('[data-oauth-act="connect"]')?.addEventListener('click', () => openOauthConnect(provider));
+    card.querySelector('[data-oauth-act="disconnect"]')?.addEventListener('click', async () => {
+      const ok = await confirmDialog({
+        title: `断开 ${provider.name} 账户？`,
+        message: '本机保存的访问令牌与刷新令牌会被删除。使用该账户的供应商将无法继续请求，直到重新连接或改用 API Key。',
+        confirmText: '断开连接'
+      });
+      if (!ok) return;
+      try {
+        await window.dcb.oauthDisconnect(provider.id);
+        oauthCache = null;
+        toast(`${provider.name} 账户已断开`);
+        renderOauth();
+      } catch (err) {
+        toast(err.message || '断开失败', 'error');
+      }
+    });
+  });
+}
+
+function openOauthConnect(provider) {
+  let flowId = '';
+  let phase = 1;
+  let busy = false;
+
+  const body = `
+    <div class="oauth-status-line" id="oauthStatus"><span class="dot"></span><span id="oauthStatusText">填写客户端信息后开始授权</span></div>
+    <div class="field">
+      <label>Client ID <span class="hint">${provider.publicClient ? '已预置公开客户端，可替换为自己的' : '必填'}</span></label>
+      <input class="input mono" id="oauthClientId" value="${escapeHtml(provider.clientId || '')}" placeholder="OAuth Client ID" spellcheck="false" />
+    </div>
+    <div class="field">
+      <label>Client Secret <span class="hint">可选，公开客户端通常不需要</span></label>
+      <input class="input mono" id="oauthSecret" type="password" placeholder="${provider.hasSecret ? '已保存，留空保持不变' : '不填写则使用 PKCE 公共客户端'}" spellcheck="false" />
+    </div>
+    <div class="field" id="oauthManual" hidden>
+      <label>授权码 <span class="hint">从浏览器回调页复制</span></label>
+      <input class="input mono" id="oauthCode" placeholder="粘贴授权码，或 code#state" spellcheck="false" />
+      <p class="input-hint">Anthropic 会在授权完成后显示一段授权码，复制回这里即可完成连接。</p>
+    </div>
+    <details class="oauth-endpoints">
+      <summary>高级：端点与权限范围</summary>
+      <div class="field">
+        <label>授权端点</label>
+        <input class="input mono" id="oauthAuthorizeUrl" value="${escapeHtml(provider.authorizeUrl || '')}" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>令牌端点</label>
+        <input class="input mono" id="oauthTokenUrl" value="${escapeHtml(provider.tokenUrl || '')}" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>权限范围</label>
+        <input class="input mono" id="oauthScopes" value="${escapeHtml(provider.scopes || '')}" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>回调地址 <span class="hint">由平台注册决定</span></label>
+        <input class="input mono" value="${escapeHtml(provider.redirectUri || '')}" disabled />
+      </div>
+    </details>
+    <div class="form-error" id="oauthErr"></div>
+  `;
+
+  const modalPromise = openModal({
+    title: `连接 ${provider.name} 账户`,
+    desc: provider.hint,
+    width: 'wide',
+    body,
+    actions: [
+      {
+        label: '取消',
+        onClick: async () => {
+          if (flowId) await window.dcb.oauthCancel(flowId).catch(() => {});
+          return true;
+        }
+      },
+      {
+        label: '开始授权',
+        variant: 'primary',
+        onClick: async (close) => {
+          if (busy) return false;
+          const errEl = $('#oauthErr');
+          const status = $('#oauthStatusText');
+          errEl.textContent = '';
+          const code = $('#oauthCode')?.value.trim() || '';
+
+          if (phase === 2) {
+            if (!code) {
+              errEl.textContent = '请粘贴浏览器给出的授权码';
+              return false;
+            }
+            busy = true;
+            status.textContent = '正在验证授权码…';
+            try {
+              await window.dcb.oauthComplete({ id: flowId, code });
+              close(true);
+              return true;
+            } catch (err) {
+              errEl.textContent = err.message || '授权失败';
+              status.textContent = '授权未完成';
+              busy = false;
+              return false;
+            }
+          }
+
+          const clientId = $('#oauthClientId').value.trim();
+          if (!clientId) {
+            errEl.textContent = '请填写 Client ID';
+            return false;
+          }
+
+          busy = true;
+          try {
+            await window.dcb.oauthSaveClient({
+              provider: provider.id,
+              clientId,
+              clientSecret: $('#oauthSecret').value,
+              authorizeUrl: $('#oauthAuthorizeUrl').value,
+              tokenUrl: $('#oauthTokenUrl').value,
+              scopes: $('#oauthScopes').value
+            });
+            oauthCache = null;
+            status.textContent = '正在打开浏览器…';
+            const flow = await window.dcb.oauthBegin({ provider: provider.id });
+            flowId = flow.id;
+            if (flow.mode === 'manual') {
+              phase = 2;
+              $('#oauthManual').hidden = false;
+              status.textContent = '请在浏览器完成授权，然后把授权码粘贴到下方';
+              const primary = document.querySelector('.modal-foot .btn-primary');
+              if (primary) primary.textContent = '完成连接';
+              setTimeout(() => $('#oauthCode')?.focus(), 50);
+              busy = false;
+              return false;
+            }
+
+            status.textContent = '已打开浏览器，等待授权完成…';
+            const connection = await window.dcb.oauthWait(flow.id);
+            oauthCache = null;
+            close(connection || true);
+            return true;
+          } catch (err) {
+            errEl.textContent = err.message || '无法发起授权';
+            status.textContent = '授权未开始';
+            busy = false;
+            return false;
+          }
+        }
+      }
+    ],
+    onMount: (bodyEl) => {
+      bodyEl.querySelector('#oauthClientId')?.focus();
+    }
+  });
+
+  modalPromise.then((saved) => {
+    if (!saved) return;
+    oauthCache = null;
+    toast(`${provider.name} 账户已连接`);
+    if (currentTab === 'oauth') renderOauth();
+    else renderTab('oauth');
+  });
 }
 
 /* ------------------------------ 快捷键 ------------------------------ */
@@ -634,7 +961,6 @@ function stopRecording() {
 
 function renderGeneral() {
   const cfg = state.config;
-  const accent = cfg.ui?.accent || 'coral';
 
   $('#setBody').innerHTML = `
     <div class="card">
@@ -676,24 +1002,6 @@ function renderGeneral() {
         </div>
         <div class="sr-control">
           <input class="input narrow" id="setMaxTokens" type="number" min="256" max="128000" step="256" value="${cfg.chat.maxTokens ?? 4096}" />
-        </div>
-      </div>
-      <div class="set-row">
-        <div>
-          <div class="sr-title">强调色</div>
-          <div class="sr-desc">多巴胺色板，随心情切换</div>
-        </div>
-        <div class="sr-control">
-          <div class="accent-swatches">
-            ${[
-              ['coral', '珊瑚红'],
-              ['amber', '琥珀橙'],
-              ['mint', '薄荷绿'],
-              ['sky', '天空蓝']
-            ]
-              .map(([name, label]) => `<button class="swatch ${accent === name ? 'active' : ''}" data-accent="${name}" title="${label}" aria-label="${label}"></button>`)
-              .join('')}
-          </div>
         </div>
       </div>
       <div class="set-row">
@@ -745,14 +1053,6 @@ function renderGeneral() {
     clearTimeout(promptTimer);
     const value = event.target.value;
     promptTimer = setTimeout(() => patchConfig({ chat: { ...state.config.chat, systemPrompt: value } }), 600);
-  });
-
-  $$('#setBody .swatch').forEach((swatch) => {
-    swatch.addEventListener('click', async () => {
-      $$('#setBody .swatch').forEach((s) => s.classList.toggle('active', s === swatch));
-      document.body.dataset.accent = swatch.dataset.accent;
-      await patchConfig({ ui: { ...state.config.ui, accent: swatch.dataset.accent } });
-    });
   });
 
   let fontTimer = null;
@@ -967,10 +1267,11 @@ function renderData() {
       </div>
       <div class="kv-list">
         <dt>配置文件</dt><dd>${escapeHtml(info.paths?.config || '')}</dd>
+        <dt>OAuth 配置</dt><dd>${escapeHtml(info.paths?.oauth || '~/.dcb/oauth.json')}</dd>
         <dt>MCP 配置</dt><dd>${escapeHtml(info.paths?.mcp || '~/.dcb/mcp.json')}</dd>
         <dt>技能目录</dt><dd>${escapeHtml(info.paths?.skills || '~/.dcb/skills')}</dd>
         <dt>对话数量</dt><dd>${chatCount} 段</dd>
-        <dt>当前权限</dt><dd>${PERMISSIONS[state.config.ui.permission]?.label || '普通权限'}</dd>
+        <dt>当前权限</dt><dd>${PERMISSIONS[currentPermission()]?.label || '普通权限'}</dd>
       </div>
     </div>
 
@@ -995,10 +1296,9 @@ function renderData() {
     <div class="card">
       <div class="about-box">
         <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-          <defs><linearGradient id="aboutGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF6B4A"/><stop offset="1" stop-color="#FFB020"/></linearGradient></defs>
-          <rect width="32" height="32" rx="9" fill="url(#aboutGrad)"/>
-          <path d="M9 10h14a2.6 2.6 0 0 1 2.6 2.6v6a2.6 2.6 0 0 1-2.6 2.6h-6.1l-3.7 3c-.7.6-1.7.1-1.7-.8v-2.2H9a2.6 2.6 0 0 1-2.6-2.6v-6A2.6 2.6 0 0 1 9 10Z" fill="#fff"/>
-          <circle cx="12.4" cy="15.6" r="1.25" fill="#FF6B4A"/><circle cx="16.4" cy="15.6" r="1.25" fill="#FFB020"/><circle cx="20.4" cy="15.6" r="1.25" fill="#12B886"/>
+          <rect width="32" height="32" rx="8" fill="#2563EB"/>
+          <path d="M9.4 10.4h13.2a2.4 2.4 0 0 1 2.4 2.4v5.8a2.4 2.4 0 0 1-2.4 2.4h-5.8l-3.6 2.9c-.7.6-1.8.1-1.8-.8v-2.1H9.4a2.4 2.4 0 0 1-2.4-2.4v-5.8a2.4 2.4 0 0 1 2.4-2.4Z" fill="#fff"/>
+          <circle cx="12.6" cy="15.7" r="1.15" fill="#2563EB"/><circle cx="16.6" cy="15.7" r="1.15" fill="#2563EB"/><circle cx="20.6" cy="15.7" r="1.15" fill="#2563EB"/>
         </svg>
         <div>
           <h3>DgxayChatBox</h3>
@@ -1006,7 +1306,7 @@ function renderData() {
         </div>
       </div>
       <div class="kv-list">
-        <dt>版本</dt><dd>V1.1（${escapeHtml(info.version || '1.1.0')}）</dd>
+        <dt>版本</dt><dd>V1.2（${escapeHtml(info.version || '1.2.0')}）</dd>
         <dt>运行环境</dt><dd>Electron · ${escapeHtml(info.platform || 'win32')}</dd>
         <dt>接口协议</dt><dd>ChatCompletions · Anthropic Messages · Responses</dd>
         <dt>配置文件</dt><dd>~/.dcb/config.json</dd>

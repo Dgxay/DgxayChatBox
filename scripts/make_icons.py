@@ -9,10 +9,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")
 ASSETS = os.path.join(ROOT, "src", "renderer", "assets")
 
-CORAL = (255, 107, 74)
-AMBER = (255, 176, 32)
+BLUE = (37, 99, 235)
+CORAL = BLUE
+AMBER = BLUE
 WHITE = (255, 255, 255)
-DOT_COLORS = [(255, 92, 61), (240, 160, 42), (18, 184, 134)]
+DOT_COLORS = [BLUE, BLUE, BLUE]
 
 
 def inside_round_rect(x, y, x0, y0, x1, y1, r):

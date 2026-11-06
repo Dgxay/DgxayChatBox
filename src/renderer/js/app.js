@@ -9,6 +9,7 @@ import {
   recentWorkspaces,
   workspaceLabel,
   PERMISSIONS,
+  hasReviewModel,
   providers,
   emit
 } from './store.js';
@@ -142,7 +143,7 @@ function bindStaticEvents() {
 function applyConfigUI() {
   const config = state.config;
   if (!config) return;
-  document.body.dataset.accent = config.ui?.accent || 'coral';
+  document.body.dataset.accent = config.ui?.accent === 'coral' || !config.ui?.accent ? 'blue' : config.ui.accent;
   document.body.dataset.mode = config.ui?.mode === 'work' ? 'work' : 'chat';
   document.documentElement.style.setProperty('--font-scale', String(config.ui?.fontScale || 1));
 
@@ -156,8 +157,18 @@ function applyConfigUI() {
   const kbdSet = $('#kbdSettings');
   if (kbdSet) kbdSet.textContent = config.shortcuts?.settings || '';
   const ver = $('#setVersion');
-  if (ver && state.info) ver.textContent = 'V1.1';
+  if (ver && state.info) ver.textContent = 'V1.2';
+
+  // 自动审查模式只在已配置审查模型时可用，移除配置后回落到普通权限
+  if (config.ui?.permission === 'auto' && !hasReviewModel() && !autoFallbackPending) {
+    autoFallbackPending = true;
+    patchConfig({ ui: { ...config.ui, permission: 'normal' } }).finally(() => {
+      autoFallbackPending = false;
+    });
+  }
 }
+
+let autoFallbackPending = false;
 
 /* ------------------------------ 模式与权限 ------------------------------ */
 
@@ -190,6 +201,10 @@ async function setPermission(permission) {
   if (!PERMISSIONS[permission] || permission === currentPermission()) return;
   if (!state.config?.onboarded) return;
 
+  if (permission === 'auto' && !hasReviewModel()) {
+    toast('请先在供应商设置中配置自动审查模型', 'warn', 3600);
+    return;
+  }
   if (permission === 'full') {
     const confirmed = await confirmFullPermission();
     if (!confirmed) return;
@@ -197,11 +212,13 @@ async function setPermission(permission) {
 
   await patchConfig({ ui: { ...state.config.ui, permission } });
   chat.refreshAll();
-  if (permission === 'normal' && !providers().some((provider) => provider.reviewModelId)) {
-    toast('普通权限已开启；尚未配置自动审查模型，操作都会询问你', 'warn', 4200);
-  } else {
-    toast(`权限已切换为${PERMISSIONS[permission].label}`);
-  }
+  const messages = {
+    none: '无权限已开启：AI 只能只读访问工作空间',
+    normal: '普通权限已开启：每次操作都会先询问你',
+    auto: '自动审查已开启：安全操作自动放行，可疑操作再询问你',
+    full: '完全权限已开启：AI 不再受限制'
+  };
+  toast(messages[permission] || `权限已切换为${PERMISSIONS[permission].label}`);
 }
 
 function confirmFullPermission() {
@@ -282,20 +299,28 @@ async function handleWorkspaceClick(event) {
 /* ------------------------------ 联网授权 ------------------------------ */
 
 async function handlePermissionRequest(request) {
-  const reviewBox = request.review
-    ? `<div class="review-box">${icons.alert}<div><b>${escapeHtml(
-        request.reviewer || '自动审查'
-      )}</b> 未放行这次操作：<br />${escapeHtml(request.review)}</div></div>`
-    : `<div class="review-box review-ok">${icons.shield}<div>尚未配置自动审查模型，普通权限下的所有操作都需要你确认。</div></div>`;
+  const auto = request.permission === 'auto';
+  let note;
+  if (auto) {
+    note = request.review
+      ? `<div class="review-box">${icons.alert}<div><b>${escapeHtml(
+          request.reviewer || '自动审查'
+        )}</b> 未放行这次操作：<br />${escapeHtml(request.review)}</div></div>`
+      : `<div class="review-box review-ok">${icons.shield}<div>自动审查模型未给出明确结论，需要你确认这次操作。</div></div>`;
+  } else {
+    note = `<div class="review-box review-ok">${icons.shield}<div>普通权限会为每一次操作单独请求你的确认，包括读取文件、写入文件、联网与执行命令。</div></div>`;
+  }
 
   const decision = await openModal({
     title: request.title || 'AI 请求执行操作',
     icon: icons.shield,
     width: 'warn',
-    desc: '普通权限拥有全部能力，但每次实际操作都需要审查模型判断或你的授权。',
+    desc: auto
+      ? '自动审查认为这次操作需要你确认。请检查命令、路径与参数。'
+      : '这次操作需要你的授权，确认后才会执行。',
     body: `
       <pre class="op-detail">${escapeHtml(request.detail || '')}</pre>
-      ${reviewBox}
+      ${note}
       <p class="form-note">授权只对本次操作生效。发现命令、路径或参数可疑时请拒绝。</p>
     `,
     actions: [
