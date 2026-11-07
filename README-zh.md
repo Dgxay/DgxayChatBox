@@ -142,6 +142,8 @@ npm run dev      # 启动并打开开发者工具
 
 界面使用原生 HTML / CSS / ES Modules，没有前端构建步骤。整体为 ChatGPT / Claude 风格的浅色布局，单一蓝色强调色；所有数字通过首选的等宽字形呈现。
 
+开发约定、权限边界、OAuth 与三平台打包的注意事项，统一整理在 [NOTES.md](./NOTES.md)。
+
 ## 打包
 
 ```bash

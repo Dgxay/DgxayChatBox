@@ -143,6 +143,8 @@ npm run dev      # launch with DevTools
 
 The renderer is plain HTML/CSS/ES Modules — there is no frontend build step.
 
+Project conventions, permission boundaries, OAuth and packaging caveats are collected in [NOTES.md](./NOTES.md) (Chinese).
+
 ## Packaging
 
 ```bash
