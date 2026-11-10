@@ -41,7 +41,7 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: DgxayChatBox-${{ matrix.name }}
+          name: DgxayCode-${{ matrix.name }}
           path: |
             dist/*.exe
             dist/*.dmg

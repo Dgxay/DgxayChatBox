@@ -14,6 +14,8 @@ import { $, $$, escapeHtml, toast, openModal, confirmDialog, accelFromEvent, uid
 import { icons } from './icons.js';
 import { refreshAll, refreshChrome } from './chat.js';
 import { PROTOCOLS, PROTOCOL_ORDER, protocolMeta, protocolOf, protocolCardsHtml } from './protocols.js';
+import { THEME_OPTIONS, applyTheme, themePreference } from './theme.js';
+import { applyWidowGuard } from './typography.js';
 
 const TABS = {
   providers: {
@@ -116,6 +118,8 @@ function renderTab(tab) {
   else if (tab === 'mcp') renderMcp();
   else if (tab === 'general') renderGeneral();
   else renderData();
+
+  applyWidowGuard($('#setBody'));
 }
 
 /* ------------------------------ 供应商 ------------------------------ */
@@ -650,7 +654,7 @@ async function renderOauth() {
   body.innerHTML = `
     <div class="oauth-note">
       ${icons.shield}
-      <div><b>授权在你的系统浏览器中完成。</b> 令牌保存在本机（优先使用系统加密），不会上传到 DgxayChatBox 的服务器。连接后可在供应商的「认证方式」中选择对应账户；若平台限制订阅令牌推理，可随时切回 API Key。</div>
+      <div><b>授权在你的系统浏览器中完成。</b> 令牌保存在本机（优先使用系统加密），不会上传到 DgxayCode 的服务器。连接后可在供应商的「认证方式」中选择对应账户；若平台限制订阅令牌推理，可随时切回 API Key。</div>
     </div>
     <div class="oauth-grid">${list.map(oauthCard).join('')}</div>
     <div class="card">
@@ -859,7 +863,7 @@ function renderShortcuts() {
       <div class="set-row">
         <div>
           <div class="sr-title">全局唤起窗口</div>
-          <div class="sr-desc">即使窗口在后台，也能用组合键呼出 DgxayChatBox</div>
+          <div class="sr-desc">即使窗口在后台，也能用组合键呼出 DgxayCode</div>
         </div>
         <div class="sr-control" style="display:flex;align-items:center;gap:10px">
           <button class="sk-record" data-key="globalShortcut">${escapeHtml(state.config.advanced?.globalShortcut || 'Ctrl+Shift+Space')}</button>
@@ -959,11 +963,37 @@ function stopRecording() {
 
 /* ------------------------------ 通用 ------------------------------ */
 
+function syncRange(el) {
+  if (!el) return;
+  const min = Number(el.min || 0);
+  const max = Number(el.max || 100);
+  const value = Number(el.value);
+  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
+  el.style.setProperty('--range-p', `${Math.min(100, Math.max(0, pct))}%`);
+}
+
 function renderGeneral() {
   const cfg = state.config;
+  const themePref = themePreference();
 
   $('#setBody').innerHTML = `
     <div class="card">
+      <div class="set-row">
+        <div>
+          <div class="sr-title">外观</div>
+          <div class="sr-desc">深色模式不使用纯黑底色，字重也会随之轻一档</div>
+        </div>
+        <div class="sr-control">
+          <div class="segmented" id="setTheme" role="radiogroup" aria-label="外观">
+            ${THEME_OPTIONS.map(
+              (item) =>
+                `<button type="button" data-theme="${item.value}" role="radio" aria-checked="${themePref === item.value}" class="${
+                  themePref === item.value ? 'active' : ''
+                }">${item.label}</button>`
+            ).join('')}
+          </div>
+        </div>
+      </div>
       <div class="set-row">
         <div>
           <div class="sr-title">发送方式</div>
@@ -1023,6 +1053,17 @@ function renderGeneral() {
     </div>
   `;
 
+  $$('#setTheme button').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      $$('#setTheme button').forEach((item) => {
+        item.classList.toggle('active', item === btn);
+        item.setAttribute('aria-checked', String(item === btn));
+      });
+      applyTheme(btn.dataset.theme);
+      await patchConfig({ ui: { ...state.config.ui, theme: btn.dataset.theme } });
+    });
+  });
+
   $('#setSendKey').addEventListener('change', async (event) => {
     await patchConfig({ chat: { ...state.config.chat, enterToSend: event.target.value === 'enter' } });
     refreshChrome();
@@ -1037,6 +1078,7 @@ function renderGeneral() {
 
   let tempTimer = null;
   $('#setTemp').addEventListener('input', (event) => {
+    syncRange(event.target);
     $('#tempValue').textContent = Number(event.target.value).toFixed(1);
     clearTimeout(tempTimer);
     tempTimer = setTimeout(() => patchConfig({ chat: { ...state.config.chat, temperature: Number(event.target.value) } }), 350);
@@ -1057,12 +1099,15 @@ function renderGeneral() {
 
   let fontTimer = null;
   $('#setFont').addEventListener('input', (event) => {
+    syncRange(event.target);
     const value = Number(event.target.value);
     $('#fontValue').textContent = `${Math.round(value * 100)}%`;
     document.documentElement.style.setProperty('--font-scale', String(value));
     clearTimeout(fontTimer);
     fontTimer = setTimeout(() => patchConfig({ ui: { ...state.config.ui, fontScale: value } }), 350);
   });
+
+  $$('#setBody input[type="range"]').forEach(syncRange);
 }
 
 /* ------------------------------ MCP ------------------------------ */
@@ -1301,12 +1346,12 @@ function renderData() {
           <circle cx="12.6" cy="15.7" r="1.15" fill="#2563EB"/><circle cx="16.6" cy="15.7" r="1.15" fill="#2563EB"/><circle cx="20.6" cy="15.7" r="1.15" fill="#2563EB"/>
         </svg>
         <div>
-          <h3>DgxayChatBox</h3>
+          <h3>DgxayCode</h3>
           <p>一个简洁、明快的多模型 AI 桌面工作台。数据留在本地，权限由你掌握。</p>
         </div>
       </div>
       <div class="kv-list">
-        <dt>版本</dt><dd>V1.2（${escapeHtml(info.version || '1.2.0')}）</dd>
+        <dt>版本</dt><dd>V1.3（${escapeHtml(info.version || '1.3.0')}）</dd>
         <dt>运行环境</dt><dd>Electron · ${escapeHtml(info.platform || 'win32')}</dd>
         <dt>接口协议</dt><dd>ChatCompletions · Anthropic Messages · Responses</dd>
         <dt>配置文件</dt><dd>~/.dcb/config.json</dd>

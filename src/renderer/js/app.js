@@ -18,12 +18,16 @@ import { icons } from './icons.js';
 import * as chat from './chat.js';
 import * as settings from './settings.js';
 import { initOnboarding } from './onboarding.js';
+import { initTheme, applyTheme } from './theme.js';
+import { initSquircle } from './squircle.js';
+import { scheduleWidowGuard } from './typography.js';
 
 const MAXIMIZE_ICON = '<svg viewBox="0 0 12 12"><rect x="2.4" y="2.4" width="7.2" height="7.2" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
 const RESTORE_ICON = '<svg viewBox="0 0 12 12"><rect x="2.2" y="4" width="6" height="6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.15"/><path d="M4.3 4V2.9c0-.5.4-.9.9-.9h4c.5 0 .9.4.9.9v4c0 .5-.4.9-.9.9H8.2" fill="none" stroke="currentColor" stroke-width="1.15"/></svg>';
 
 async function boot() {
   bindWindowControls();
+  initSquircle();
 
   let info;
   try {
@@ -34,6 +38,7 @@ async function boot() {
   }
 
   await initStore(info);
+  initTheme(info);
   document.body.classList.toggle('platform-darwin', info.platform === 'darwin');
 
   chat.initChat();
@@ -45,7 +50,7 @@ async function boot() {
   if (info.onboarded && info.hasDir) {
     $('#onboard').hidden = true;
     chat.refreshAll();
-    document.title = 'DgxayChatBox';
+    document.title = 'DgxayCode';
   } else {
     initOnboarding();
   }
@@ -134,6 +139,8 @@ function bindStaticEvents() {
   };
   document.addEventListener('keydown', keydownHandler);
 
+  window.addEventListener('resize', () => scheduleWidowGuard());
+
   on('config', () => {
     applyConfigUI();
     chat.refreshChrome();
@@ -146,6 +153,7 @@ function applyConfigUI() {
   document.body.dataset.accent = config.ui?.accent === 'coral' || !config.ui?.accent ? 'blue' : config.ui.accent;
   document.body.dataset.mode = config.ui?.mode === 'work' ? 'work' : 'chat';
   document.documentElement.style.setProperty('--font-scale', String(config.ui?.fontScale || 1));
+  applyTheme(config.ui?.theme || 'system');
 
   $$('#modeSwitch button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === (config.ui?.mode || 'chat'));
@@ -157,7 +165,7 @@ function applyConfigUI() {
   const kbdSet = $('#kbdSettings');
   if (kbdSet) kbdSet.textContent = config.shortcuts?.settings || '';
   const ver = $('#setVersion');
-  if (ver && state.info) ver.textContent = 'V1.2';
+  if (ver && state.info) ver.textContent = 'V1.3';
 
   // 自动审查模式只在已配置审查模型时可用，移除配置后回落到普通权限
   if (config.ui?.permission === 'auto' && !hasReviewModel() && !autoFallbackPending) {

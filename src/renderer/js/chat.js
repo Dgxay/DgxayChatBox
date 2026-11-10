@@ -36,6 +36,8 @@ import {
 } from './ui.js';
 import { renderMarkdown } from './markdown.js';
 import { icons, toolIcons, toolLabels } from './icons.js';
+import { paintStream } from './streamfx.js';
+import { applyWidowGuard } from './typography.js';
 
 let messagesEl;
 let inputEl;
@@ -174,7 +176,7 @@ export function refreshChrome() {
   inputEl.placeholder =
     mode === 'work'
       ? '描述任务，AI 会连续执行直到完成'
-      : '给 DgxayChatBox 发送消息';
+      : '给 DgxayCode 发送消息';
 
   document.body.dataset.mode = mode;
   updateComposerHint();
@@ -270,6 +272,7 @@ function renderThread() {
   messagesEl.innerHTML = `<div class="msg-flow">${chat.messages.map(messageHtml).join('')}</div>`;
   if (wasNearBottom) scrollToBottom();
   refreshContextRing();
+  applyWidowGuard(messagesEl);
 }
 
 function heroHtml() {
@@ -325,9 +328,7 @@ function messageHtml(msg) {
   }
 
   const tools = toolsHtml(msg);
-  const reasoning = msg.reasoning
-    ? `<details class="reasoning"><summary>思考过程</summary><div class="reasoning-body">${escapeHtml(msg.reasoning)}</div></details>`
-    : '';
+  const reasoning = reasoningHtml(msg);
   const files = filesHtml(msg);
   const error = msg.error
     ? `<div class="bubble" style="margin-top:${msg.content ? '10px' : '0'}">${escapeHtml(msg.error)}</div>`
@@ -354,6 +355,64 @@ function messageHtml(msg) {
         <div class="msg-time">${formatTime(msg.ts)}</div>
       </div>
     </div>`;
+}
+
+function reasoningHtml(msg) {
+  if (!msg.reasoning) return '';
+  const elapsed = thinkingElapsed(msg);
+  const showTime = msg.streaming || elapsed > 0;
+  return `<div class="reasoning" data-open="0">
+    <button type="button" class="reasoning-summary" aria-expanded="false">
+      <span class="rs-caret" aria-hidden="true"></span>
+      <span class="rs-label">思考过程</span>
+      ${
+        showTime
+          ? `<span class="rs-time${msg.streaming ? ' live' : ''}"${
+              msg.streaming ? ' data-live="1"' : ''
+            }>${formatThinking(elapsed)}</span>`
+          : ''
+      }
+    </button>
+    <div class="reasoning-fold">
+      <div class="reasoning-clip"><div class="reasoning-body">${escapeHtml(msg.reasoning)}</div></div>
+    </div>
+  </div>`;
+}
+
+function thinkingElapsed(msg) {
+  if (msg.streaming && msg._reasonStart) return Date.now() - msg._reasonStart;
+  return Number(msg.reasoningMs) || 0;
+}
+
+function formatThinking(ms) {
+  const total = Math.max(0, Number(ms) || 0) / 1000;
+  if (total < 60) return `${total.toFixed(1)}s`;
+  const minutes = Math.floor(total / 60);
+  const seconds = Math.floor(total % 60);
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+let thinkingClock = null;
+
+function startThinkingClock(msg) {
+  if (thinkingClock) clearInterval(thinkingClock);
+  thinkingClock = setInterval(() => {
+    const box = messagesEl?.querySelector(`.msg[data-id="${msg._id}"] .reasoning`);
+    if (!box) return;
+    const time = box.querySelector('.rs-time');
+    if (time) time.textContent = formatThinking(Date.now() - msg._reasonStart);
+  }, 100);
+}
+
+function stopThinkingClock(msg) {
+  if (thinkingClock) {
+    clearInterval(thinkingClock);
+    thinkingClock = null;
+  }
+  if (msg && msg._reasonStart) {
+    msg.reasoningMs = Date.now() - msg._reasonStart;
+    msg._reasonStart = 0;
+  }
 }
 
 function toolsHtml(msg) {
@@ -542,6 +601,16 @@ function scrollToBottom(behavior = 'auto') {
 }
 
 function handleMessageClick(event) {
+  const summary = event.target.closest('.reasoning-summary');
+  if (summary) {
+    const box = summary.closest('.reasoning');
+    if (box) {
+      const open = box.dataset.open === '1';
+      box.dataset.open = open ? '0' : '1';
+      summary.setAttribute('aria-expanded', String(!open));
+    }
+    return;
+  }
   const suggest = event.target.closest('.suggest');
   if (suggest) {
     inputEl.value = suggest.dataset.prompt || '';
@@ -1280,6 +1349,7 @@ export async function sendMessage() {
     assistant.streaming = false;
     assistant.error = err?.message || '请求失败，请检查网络或供应商配置';
   } finally {
+    stopThinkingClock(assistant);
     state.streaming = false;
     state.currentRequestId = null;
     finishStreamingUI(chat);
@@ -1336,6 +1406,12 @@ function handleChatEvent(event) {
     }
     case 'reasoning': {
       msg.reasoning = (msg.reasoning || '') + (event.text || '');
+      if (!msg._reasonStart) {
+        msg._reasonStart = Date.now();
+        // 首个思考片段到达时才插入思考框，避免每段回复都出现空的折叠块
+        repaintMessage(msg);
+        startThinkingClock(msg);
+      }
       queueStreamPaint(true);
       break;
     }
@@ -1405,12 +1481,11 @@ function paintStreaming(msg) {
   }
   const keep = nearBottom();
   const md = el.querySelector('.md');
-  if (md) {
-    md.innerHTML = `${renderMarkdown(msg.content || '')}<span class="stream-cursor"></span>`;
-  } else {
+  if (!md) {
     repaintMessage(msg);
     return;
   }
+  paintStream(md, msg.content || '');
   const reasoningEl = el.querySelector('.reasoning-body');
   if (reasoningEl) reasoningEl.textContent = msg.reasoning;
   refreshContextRing();

@@ -106,7 +106,7 @@ const DEFINITIONS = {
     function: {
       name: 'install_mcp_server',
       description:
-        'Install an MCP server into DgxayChatBox by saving its startup command to ~/.dcb/mcp.json. The user can start it later from Settings → MCP.',
+        'Install an MCP server into DgxayCode by saving its startup command to ~/.dcb/mcp.json. The user can start it later from Settings → MCP.',
       parameters: {
         type: 'object',
         properties: {
@@ -335,7 +335,7 @@ async function execute(name, args, ctx) {
       try {
         const res = await fetch(url, {
           method: (args.method || 'GET').toUpperCase(),
-          headers: { 'User-Agent': 'Mozilla/5.0 DgxayChatBox/1.0', ...(args.body ? { 'Content-Type': 'application/json' } : {}) },
+          headers: { 'User-Agent': 'Mozilla/5.0 DgxayCode/1.0', ...(args.body ? { 'Content-Type': 'application/json' } : {}) },
           body: args.body || undefined,
           signal: controller.signal
         });

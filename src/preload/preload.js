@@ -58,5 +58,7 @@ contextBridge.exposeInMainWorld('dcb', {
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
     close: () => ipcRenderer.send('window:close'),
     onState: (cb) => subscribe('window:state', cb)
-  }
+  },
+
+  onSystemTheme: (cb) => subscribe('theme:system', cb)
 });

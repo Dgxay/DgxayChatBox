@@ -27,6 +27,7 @@ const DEFAULT_CONFIG = {
     mode: 'chat',
     permission: 'normal',
     accent: 'blue',
+    theme: 'system',
     fontScale: 1,
     showSidebar: true
   },
@@ -97,7 +98,7 @@ function readConfig() {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     const merged = deepMerge(base, parsed);
-    // 旧版本使用珊瑚色作为主题色，V1.2 起统一为蓝色
+    // 旧版本使用珊瑚色作为主题色，现统一为蓝色（V1.2 之前的配置读取时自动迁移）
     if (!merged.ui) merged.ui = { ...base.ui };
     if (!merged.ui.accent || merged.ui.accent === 'coral') merged.ui.accent = 'blue';
     merged.meta = {

@@ -1,7 +1,7 @@
-# DgxayChatBox 项目注意事项
+# DgxayCode 项目注意事项
 
-适用版本：**V1.2（1.2.0）**  
-最后更新：2026-11-07  
+适用版本：**V1.3（1.3.0）**  
+最后更新：2026-11-09  
 配套文档：[README-zh.md](./README-zh.md)、[README.md](./README.md)
 
 本文汇总开发、调试、日常使用与打包发布全过程中容易踩坑的地方。开始改代码或分发安装包前，建议先通读第 3、4、10、11 节。
@@ -26,9 +26,13 @@
 | `src/main/oauth.js` | OAuth PKCE、回环回调、令牌存储与刷新 |
 | `src/main/mcp.js` | `mcp.json`、MCP 子进程启停与日志 |
 | `src/main/skills.js` | 扫描 `~/.dcb/skills` |
-| `src/renderer/js/chat.js` | 对话、斜杠命令、终端卡片、上下文环 |
+| `src/renderer/js/chat.js` | 对话、斜杠命令、终端卡片、上下文环、思考框 |
 | `src/renderer/js/settings.js` | 供应商、OAuth、MCP、快捷键、通用、数据 |
 | `src/renderer/js/store.js` | 前端状态、权限元数据、会话持久化 |
+| `src/renderer/js/theme.js` | 浅色 / 深色 / 跟随系统，只切 `<html data-theme>` |
+| `src/renderer/js/squircle.js` | 连续曲率圆角（超椭圆 path 裁切，原生支持时自动让位） |
+| `src/renderer/js/streamfx.js` | 流式增量渲染 + 逐字高斯模糊入场 |
+| `src/renderer/js/typography.js` | 正文孤字保护（末尾两个字不拆行） |
 
 ---
 
@@ -61,6 +65,7 @@ npm run dev    # 启动并打开开发者工具
 | `DCB_SHOT` | 启动后截图到指定路径并退出 |
 | `DCB_SHOT_JS` | 截图前执行任意 JS（仅测试） |
 | `DCB_SHOT_DELAY` | 截图前等待毫秒数 |
+| `DCB_SHOT_ZOOM` | 截图前设置页面缩放（小屏幕可用更大的逻辑视口预览布局） |
 | `DCB_DISABLE_GPU` | 禁用硬件加速，适配无 GPU 环境 |
 
 `DCB_SHOT_JS` 等同于远程执行代码，只能在本机测试使用。
@@ -86,6 +91,7 @@ npm run dev    # 启动并打开开发者工具
 - 配置读取采用“默认值深合并”。旧配置缺字段会自动补默认值；不要假设用户配置一定包含新字段。
 - **供应商顺序有意义**：`providers[0]` 是默认供应商，也是未配置审查模型时的回退来源。拖动/删除第一个供应商会改变默认审查模型。
 - 旧版本的珊瑚色主题会在读取时自动迁移为蓝色；这是目前唯一的配置迁移逻辑。改版本号不会自动迁移其他字段。
+- `ui.theme` 只保存 `system` / `light` / `dark`；实际生效的主题由 `theme.js` 解析后写到 `<html data-theme>`。跟随系统时主进程用 `nativeTheme` 推送变化，不需要刷新窗口。
 - 升级/重装不会删除 `~/.dcb`；NSIS 卸载器配置了 `deleteAppDataOnUninstall: false`，需要彻底清理时手动删除该目录。
 - 「设置 → 数据与关于 → 重置应用」只重置 `config.json` 与对话记录，**不会删除** `oauth.json`、`mcp.json` 和 `skills/`。OAuth 账户仍保持连接，MCP 配置与技能也仍在；彻底清理需手动删除对应文件。
 - 重置不可恢复，操作前先备份 `.dcb`。
@@ -263,15 +269,20 @@ DCB_HOME=/tmp/dcb-test npm start
 
 ## 10. 界面与代码约定
 
-- 视觉基线：ChatGPT / Claude 风格浅色界面，暖白侧栏 + 白色画布，**单一蓝色强调色 `#2563EB`**；不要引入紫色、渐变或多种高饱和强调色。
-- 目前只有浅色主题，没有暗色模式；不要假设 `prefers-color-scheme` 会切换配色。
-- 所有数字通过仅覆盖 `U+0030-0039` 的 `@font-face` 使用等宽字形（Consolas / SF Mono / JetBrains Mono / DejaVu Sans Mono）；正文字体保持不变。新增数字展示时不需要额外设置字体。
+- 视觉基线：ChatGPT / Claude 风格界面，**单一蓝色强调色 `#2563EB`**；不要引入紫色、渐变或多种高饱和强调色。
+- **层级靠微对比色阶**：`--l0`～`--l4` 每层只差 1%～3% 明度，大容器一律用底色分层，不要加回描边和重阴影。圆角处不要画 1px 边框——连续曲率裁切会把边框在转角切断。
+- **主题**：浅色 / 深色 / 跟随系统，token 定义在 `:root` 与 `:root[data-theme='dark']` 两套里。深色底色不用纯黑（`--l0: #1b1c1f`），字重通过 `--fw-1`～`--fw-6` 统一下调 40。新增颜色必须走 token，不要写死十六进制，否则深色模式会露出亮色斑块。
+- **连续曲率圆角**：`squircle.js` 用超椭圆 path 裁切 `.composer`、`.card`、`.menu`、`.modal` 等大圆角容器。被裁切元素的 `box-shadow` 会一起被裁掉，浮层阴影要放到父级 `filter: drop-shadow()`（`.menu-layer`、`.toast-layer`、`.modal-shell`、`.ob-wrap`）。可聚焦控件不做裁切，保留原生 outline。
+- 所有数字通过仅覆盖 `U+0030-0039` 的 `@font-face` 使用等宽字形（Consolas / SF Mono / JetBrains Mono / DejaVu Sans Mono）；正文字体保持不变。新增数字展示时不需要额外设置字体；需要严格等宽的地方（思考计时器）再加 `font-variant-numeric: tabular-nums` 与最小宽度。
 - 字体全部本地加载，不依赖网络；不要改成 Google Fonts 等远程字体（CSP 也会拦截）。
-- CSP 为 `default-src 'self'`，禁止内联脚本与远程脚本；新增资源必须是本地文件。
+- CSP 为 `default-src 'self'`，禁止内联脚本与远程脚本；新增资源必须是本地文件。注意：CSP 的 `style-src` 允许内联样式，`squircle.js` 依赖这一点写 `clip-path`。
 - 没有前端构建，也没有热更新；改完 HTML/CSS/JS 需要重新加载窗口（开发时可用开发者工具刷新）。
 - HTML 的 `id` 与渲染层强耦合；重命名 `#input`、`#sendBtn`、`#permList`、`#setBody` 等会导致功能静默失效，改结构后全局搜索引用。
-- 新增按钮/菜单优先复用现有 `btn`、`menu`、`modal` 组件类，避免出现第二套视觉语言。
+- 新增按钮/菜单优先复用现有 `btn`、`menu`、`modal` 组件类，避免出现第二套视觉语言。弹窗结构是 `.modal-shell`（持有投影与宽度）包 `.modal`（被裁切的本体），改弹窗时两者都要顾到。
 - Markdown 渲染使用本地实现；不要直接把未转义的用户内容插入 `innerHTML`，新增渲染逻辑时保持转义。
+- 流式输出走 `streamfx.js`：按 Markdown 顶层块做增量更新，只给新增字符包 `.fx-ch`。不要改回“每帧重建整段 innerHTML”，那样每个字都会重复触发模糊动画，整段文字会一直发抖。
+- 思考框用 `.reasoning-fold` 的 `grid-template-rows: 0fr → 1fr` 展开，不要用 JS 量高度；计时数字用 `.rs-time`（等宽 + tabular-nums）。
+- 正文孤字保护由 `typography.js` 完成：把末尾两个字包进 `.nw`（`white-space: nowrap`）。它假设元素内部是文本，不要在 `.nw` 里塞块级元素。
 - 窗口拖拽区与按钮区要区分 `-webkit-app-region: drag / no-drag`，否则按钮点不动或窗口拖不动。
 
 ---
@@ -280,7 +291,7 @@ DCB_HOME=/tmp/dcb-test npm start
 
 ### 11.1 版本号要改全
 
-版本号不是单一来源，至少检查以下位置（可直接全局搜索 `1.2.0` / `V1.2`）：
+版本号不是单一来源，至少检查以下位置（可直接全局搜索 `1.3.0` / `V1.3`）：
 
 - `package.json` → `version`
 - `package-lock.json` → 根 `version` 与 `packages[""].version`
@@ -305,7 +316,7 @@ npm run dist:linux   # Debian / Ubuntu deb（建议在 Linux 上运行）
 
 ### 11.3 Windows
 
-- 产物：`dist/DgxayChatBox-<version>-Setup.exe`，NSIS，可选安装目录，创建桌面/开始菜单快捷方式。
+- 产物：`dist/DgxayCode-<version>-Setup.exe`，NSIS，可选安装目录，创建桌面/开始菜单快捷方式。
 - **未做代码签名**，SmartScreen 会提示“未知发布者”；需要用户点“更多信息 → 仍要运行”。正式分发建议购买代码签名证书。
 - 安装包不包含 `README`、`LICENSE` 等根目录文件（`build.files` 只打包 `src` 与 `package.json`）；如需随包分发，要显式加入 `files`。
 - 卸载不会删除 `~/.dcb`。
@@ -315,13 +326,13 @@ npm run dist:linux   # Debian / Ubuntu deb（建议在 Linux 上运行）
 - electron-builder **拒绝在非 macOS 上构建 macOS 产物**，DMG 还依赖 `hdiutil`。Windows 上只能生成便携 zip。
 - 当前 Windows 构建流程：
   1. `@electron/packager` 生成 arm64 `.app`；
-  2. `scripts/make-mac-zip.py` 补图标、改 `Info.plist`、加入 `Install-DgxayChatBox.command`；
-  3. 输出 `DgxayChatBox-<version>-arm64-mac.zip`。
+  2. `scripts/make-mac-zip.py` 补图标、改 `Info.plist`、加入 `Install-DgxayCode.command`；
+  3. 输出 `DgxayCode-<version>-arm64-mac.zip`。
 - 便携包**不是 DMG**，只支持 Apple Silicon（arm64），未签名/未公证。
 - 首次打开若提示“已损坏”或“无法验证开发者”，右键打开，或执行：
 
 ```bash
-xattr -cr /Applications/DgxayChatBox.app
+xattr -cr /Applications/DgxayCode.app
 ```
 
 - 安装脚本会在本机做 ad-hoc 签名；没有 Apple Developer ID，无法彻底避免 Gatekeeper 提示。
@@ -337,9 +348,9 @@ npx electron-builder --linux dir --x64
 python scripts/make-deb.py
 ```
 
-- 产物：`dist/DgxayChatBox-<version>-amd64.deb`，仅验证 Debian / Ubuntu x64。
+- 产物：`dist/DgxayCode-<version>-amd64.deb`，仅验证 Debian / Ubuntu x64。
 - `scripts/make-deb.py` 会保留 `chrome-sandbox` 的 setuid 权限；丢失会导致 Chromium 沙箱启动失败。
-- 安装：`sudo apt install ./DgxayChatBox-<version>-amd64.deb`；依赖缺失时 `sudo apt -f install`。
+- 安装：`sudo apt install ./DgxayCode-<version>-amd64.deb`；依赖缺失时 `sudo apt -f install`。
 - 不要用 `dpkg -i` 跳过依赖解析，除非明确知道缺什么。
 
 ### 11.6 CI 与图标
@@ -380,7 +391,7 @@ done
 - 上下文用量是估算值；历史只发送最近 24 条消息。
 - `/压缩` 有损且不可撤销。
 - 没有单实例锁、自动更新、崩溃恢复、对话导出；对话最多保存 200 段。
-- 没有暗色主题；只有浅色界面。
+- 主题只有浅色 / 深色两套，没有更多分区主题；深色下阴影对比更弱，浮层主要靠底色分层。
 - Windows / macOS 产物未签名；macOS 仅 arm64 便携包（非 DMG）。
 - Linux 仅提供 x64 `.deb`，未提供 rpm / AppImage。
 - 配置与对话明文存储；OAuth 令牌在支持时加密。
@@ -418,7 +429,7 @@ done
 | 终端命令无输出/卡住 | 是否交互式命令；Windows 是否用了 bash 语法；是否超过 5 分钟 |
 | MCP 启动失败 | 命令是否在 PATH；macOS 改用绝对路径；查看 MCP 日志 |
 | MCP 启动了但 AI 不会用 | 当前版本未把 MCP 工具暴露给模型，属于已知限制 |
-| macOS 提示应用已损坏 | `xattr -cr /Applications/DgxayChatBox.app`，或右键打开 |
+| macOS 提示应用已损坏 | `xattr -cr /Applications/DgxayCode.app`，或右键打开 |
 | deb 安装缺依赖 | `sudo apt install ./xxx.deb` 或 `sudo apt -f install` |
 | 打包后界面是旧样式 | 改完未重新打包；安装包不会热更新源码 |
 

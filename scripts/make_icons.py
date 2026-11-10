@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 DgxayChatBox 应用图标（PNG + ICO），无第三方依赖。"""
+"""生成 DgxayCode 应用图标（PNG + ICO），无第三方依赖。"""
 import math
 import os
 import struct

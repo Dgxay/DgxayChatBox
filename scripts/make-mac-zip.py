@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """把 electron-packager 生成的 .app 打成 macOS arm64 便携安装包（zip）。
 
-在 Windows / Linux 上无法生成 DMG 时使用；zip 内含 Install-DgxayChatBox.command，
+在 Windows / Linux 上无法生成 DMG 时使用；zip 内含 Install-DgxayCode.command，
 会在目标 Mac 上复制到「应用程序」并做 ad-hoc 签名。
 
 用法：
-    python scripts/make-mac-zip.py --app path/to/DgxayChatBox.app
+    python scripts/make-mac-zip.py --app path/to/DgxayCode.app
 """
 import argparse
 import json
@@ -17,32 +17,32 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-README = """DgxayChatBox {version} - macOS arm64 (Apple Silicon)
+README = """DgxayCode {version} - macOS arm64 (Apple Silicon)
 
 安装方式：
-1. 双击 Install-DgxayChatBox.command，按提示安装到「应用程序」并启动。
-2. 也可以手动把 DgxayChatBox.app 拖入「应用程序」后右键 -> 打开。
+1. 双击 Install-DgxayCode.command，按提示安装到「应用程序」并启动。
+2. 也可以手动把 DgxayCode.app 拖入「应用程序」后右键 -> 打开。
 
 说明：
 - 本包未使用 Apple Developer ID 签名，安装脚本会在本机做 ad-hoc 签名并清除 quarantine。
-- 若系统仍拦截，请在终端执行：xattr -cr /Applications/DgxayChatBox.app
+- 若系统仍拦截，请在终端执行：xattr -cr /Applications/DgxayCode.app
 - 正式 DMG 安装包需在 macOS 上构建：npm run dist:mac
 """
 
 INSTALLER = """#!/bin/bash
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC="$DIR/DgxayChatBox.app"
+SRC="$DIR/DgxayCode.app"
 if [ ! -d "$SRC" ]; then
-  echo "找不到 DgxayChatBox.app，请确认压缩包已完整解压。"
+  echo "找不到 DgxayCode.app，请确认压缩包已完整解压。"
   read -r -p "按回车退出..." _
   exit 1
 fi
 if [ -w /Applications ]; then
-  DEST="/Applications/DgxayChatBox.app"
+  DEST="/Applications/DgxayCode.app"
 else
   mkdir -p "$HOME/Applications"
-  DEST="$HOME/Applications/DgxayChatBox.app"
+  DEST="$HOME/Applications/DgxayCode.app"
 fi
 echo "正在安装到 $DEST ..."
 rm -rf "$DEST"
@@ -71,8 +71,8 @@ def main():
     version = pkg["version"]
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--app", required=True, help="Path to DgxayChatBox.app")
-    parser.add_argument("--out", default=os.path.join(ROOT, "dist", f"DgxayChatBox-{version}-arm64-mac.zip"))
+    parser.add_argument("--app", required=True, help="Path to DgxayCode.app")
+    parser.add_argument("--out", default=os.path.join(ROOT, "dist", f"DgxayCode-{version}-arm64-mac.zip"))
     args = parser.parse_args()
 
     app = os.path.abspath(args.app)
@@ -97,7 +97,7 @@ def main():
     with zipfile.ZipFile(args.out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for name, data, mode in (
             ("README-mac.txt", README.format(version=version).encode("utf-8"), 0o100644),
-            ("Install-DgxayChatBox.command", INSTALLER.encode("utf-8"), 0o100755),
+            ("Install-DgxayCode.command", INSTALLER.encode("utf-8"), 0o100755),
         ):
             info = zipfile.ZipInfo(name)
             info.create_system = 3

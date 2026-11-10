@@ -31,7 +31,7 @@ const terminalProcesses = new Map();
 let permissionSeq = 0;
 let currentGlobalShortcut = null;
 
-app.setAppUserModelId('com.dgxay.chatbox');
+app.setAppUserModelId('com.dgxay.code');
 
 // 截图/无 GPU 的测试环境需要关闭硬件加速，正式运行保持默认
 if (process.env.DCB_SHOT || process.env.DCB_DISABLE_GPU === '1') {
@@ -43,6 +43,9 @@ if (process.env.DCB_SHOT || process.env.DCB_DISABLE_GPU === '1') {
 
 function createWindow() {
   const iconPath = path.join(__dirname, '../renderer/assets/icon.png');
+  const bootConfig = cfg.readConfig();
+  const bootTheme = bootConfig.ui?.theme || 'system';
+  const bootDark = bootTheme === 'dark' || (bootTheme !== 'light' && nativeTheme.shouldUseDarkColors);
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 880,
@@ -50,8 +53,8 @@ function createWindow() {
     minHeight: 660,
     show: false,
     frame: process.platform === 'darwin',
-    backgroundColor: '#F7F7F5',
-    title: 'DgxayChatBox',
+    backgroundColor: bootDark ? '#17181A' : '#F7F7F5',
+    title: 'DgxayCode',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     trafficLightPosition: { x: 16, y: 18 },
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -85,6 +88,9 @@ function createWindow() {
 
   if (process.env.DCB_SHOT) {
     mainWindow.webContents.once('did-finish-load', () => {
+      // 截图测试：小屏幕上可以缩小比例，用更大的逻辑视口预览布局
+      const zoom = Number(process.env.DCB_SHOT_ZOOM || 0);
+      if (zoom > 0) mainWindow.webContents.setZoomFactor(zoom);
       setTimeout(async () => {
         try {
           if (process.env.DCB_SHOT_JS) {
@@ -173,7 +179,7 @@ function applyGlobalShortcut() {
 function systemPromptFor({ mode, permission, workspace, customPrompt, skill }) {
   const parts = [];
   parts.push(
-    '你是 DgxayChatBox 桌面应用内置的 AI 助手。回答使用简体中文（除非用户使用其他语言），结构清晰，尽量简洁，合理使用 Markdown。'
+    '你是 DgxayCode 桌面应用内置的 AI 助手。回答使用简体中文（除非用户使用其他语言），结构清晰，尽量简洁，合理使用 Markdown。'
   );
   if (skill?.content) {
     parts.push(`【本对话启用的技能：${skill.name}】\n${skill.content}`);
@@ -248,7 +254,7 @@ function normalizeHistory(messages) {
 }
 
 const REVIEW_SYSTEM = [
-  '你是 DgxayChatBox 的本机操作安全审查模型。AI 助手在获得用户授权前，由你判断一次操作是否可能伤害用户的电脑或泄露数据。',
+  '你是 DgxayCode 的本机操作安全审查模型。AI 助手在获得用户授权前，由你判断一次操作是否可能伤害用户的电脑或泄露数据。',
   '只输出 JSON，不要代码块：{"decision":"allow","reason":"..."} 或 {"decision":"review","reason":"..."}',
   'allow 适用于：读取与任务直接相关的文件、在工作空间内写入普通文本文件、查看目录、执行只读查询、访问公开文档。',
   'review 适用于：删除或覆盖重要文件、修改工作空间外的系统/用户目录、安装/卸载/提权/服务/批量脚本、访问 .ssh/.env/密钥/浏览器数据、上传本地数据到外部、命令或目标不明确、可能不可逆。',
@@ -1079,6 +1085,10 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
 
 app.whenReady().then(() => {
   mcp.setNotifier((payload) => broadcast('mcp:event', payload));
+  // 跟随系统时把系统主题变化推给渲染层
+  nativeTheme.on('updated', () => {
+    broadcast('theme:system', { dark: nativeTheme.shouldUseDarkColors });
+  });
   createWindow();
   applyGlobalShortcut();
 

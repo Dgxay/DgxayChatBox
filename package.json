@@ -1,8 +1,8 @@
 {
-  "name": "dgxay-chatbox",
-  "productName": "DgxayChatBox",
-  "version": "1.2.0",
-  "description": "DgxayChatBox - 一个简洁、明快的多模型 AI 桌面工作台",
+  "name": "dgxay-code",
+  "productName": "DgxayCode",
+  "version": "1.3.0",
+  "description": "DgxayCode - 一个简洁、明快的多模型 AI 桌面工作台",
   "author": "Dgxay",
   "license": "GPL-3.0-only",
   "main": "src/main/main.js",
@@ -20,8 +20,8 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.dgxay.chatbox",
-    "productName": "DgxayChatBox",
+    "appId": "com.dgxay.code",
+    "productName": "DgxayCode",
     "copyright": "Copyright © 2026 Dgxay",
     "directories": {
       "output": "dist",
@@ -52,7 +52,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "DgxayChatBox",
+      "shortcutName": "DgxayCode",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "deleteAppDataOnUninstall": false
@@ -88,9 +88,9 @@
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   },
-  "homepage": "https://github.com/dgxay/DgxayChatBox",
+  "homepage": "https://github.com/dgxay/DgxayCode",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dgxay/DgxayChatBox.git"
+    "url": "https://github.com/dgxay/DgxayCode.git"
   }
 }

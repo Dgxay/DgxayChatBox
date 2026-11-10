@@ -3,7 +3,7 @@
 
 用法：
     python scripts/make-deb.py
-    python scripts/make-deb.py --app-dir dist/linux-unpacked --out dist/DgxayChatBox-1.2.0-amd64.deb
+    python scripts/make-deb.py --app-dir dist/linux-unpacked --out dist/DgxayCode-1.3.0-amd64.deb
 """
 import argparse
 import gzip
@@ -45,7 +45,7 @@ def add_dir_tree(tar, src, arc_root):
             if ti.isfile():
                 if name == "chrome-sandbox":
                     ti.mode = 0o4755
-                elif name in ("dgxay-chatbox", "chrome_crashpad_handler"):
+                elif name in ("dgxay-code", "chrome_crashpad_handler"):
                     ti.mode = 0o755
                 else:
                     ti.mode = 0o644
@@ -100,7 +100,7 @@ def main():
     args = parser.parse_args()
 
     pkg = read_pkg()
-    name = pkg["name"]  # dgxay-chatbox
+    name = pkg["name"]  # dgxay-code
     version = pkg["version"]
     product = pkg["productName"]
     out = args.out or os.path.join(ROOT, "dist", f"{product}-{version}-amd64.deb")
@@ -190,7 +190,7 @@ Maintainer: {args.maintainer}
 Installed-Size: {size_kb}
 Depends: libgtk-3-0 | libgtk-3-0t64, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0 | libatspi2.0-0t64, libuuid1, libsecret-1-0, libasound2 | libasound2t64, libgbm1
 Recommends: libayatana-appindicator3-1 | libappindicator3-1
-Homepage: https://github.com/dgxay/DgxayChatBox
+Homepage: https://github.com/dgxay/DgxayCode
 Description: {product} - multi-protocol AI desktop workspace
  A local-first AI desktop client supporting OpenAI ChatCompletions,
  Anthropic Messages and OpenAI Responses API, with a sandboxed work mode.

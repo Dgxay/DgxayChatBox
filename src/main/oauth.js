@@ -39,7 +39,7 @@ const PROVIDERS = {
     extraAuth: {
       id_token_add_organizations: 'true',
       codex_cli_simplified_flow: 'true',
-      originator: 'dgxay_chatbox'
+      originator: 'dgxay_code'
     },
     baseUrl: 'https://api.openai.com/v1',
     protocol: 'openai',
@@ -314,7 +314,7 @@ async function requestToken(config, params) {
       headers: {
         'Content-Type': config.tokenFormat === 'json' ? 'application/json' : 'application/x-www-form-urlencoded',
         Accept: 'application/json',
-        'User-Agent': 'DgxayChatBox/1.2'
+        'User-Agent': 'DgxayCode/1.3'
       },
       body,
       signal: controller.signal
@@ -411,11 +411,11 @@ function startLoopback(flow) {
       const ok = !error && Boolean(code) && state === flow.state;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(
-        `<!doctype html><meta charset="utf-8"><title>DgxayChatBox</title>` +
+        `<!doctype html><meta charset="utf-8"><title>DgxayCode</title>` +
           `<body style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f7f7f5;color:#1f2023">` +
           `<div style="text-align:center"><div style="width:44px;height:44px;border-radius:12px;background:#2563eb;display:inline-grid;place-items:center;color:#fff;font-size:22px">✓</div>` +
           `<h1 style="font-size:18px;margin:16px 0 6px">${ok ? '授权完成' : '授权未完成'}</h1>` +
-          `<p style="font-size:13px;color:#6b6d72;margin:0">${ok ? '可以关闭此页面，返回 DgxayChatBox。' : '请回到应用重试。'}</p></div></body>`
+          `<p style="font-size:13px;color:#6b6d72;margin:0">${ok ? '可以关闭此页面，返回 DgxayCode。' : '请回到应用重试。'}</p></div></body>`
       );
 
       if (!ok) {

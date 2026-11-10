@@ -251,6 +251,7 @@ export function persistChatsNow() {
         tools: m.tools?.length ? m.tools : undefined,
         files: m.files?.length ? m.files : undefined,
         reasoning: m.reasoning || undefined,
+        reasoningMs: Number(m.reasoningMs) || undefined,
         error: m.error || undefined,
         usage: m.usage || undefined,
         compressed: m.compressed || undefined,

@@ -250,8 +250,10 @@ export function openModal(options) {
       resolve(value);
     };
 
+    const shell = document.createElement('div');
+    shell.className = `modal-shell ${width} ${className}`.trim();
     const modal = document.createElement('div');
-    modal.className = `modal ${width} ${className}`.trim();
+    modal.className = 'modal';
     modal.innerHTML = `
       <div class="modal-head">
         <h3>${icon ? `<span class="warn-icon">${icon}</span>` : ''}${escapeHtml(title)}</h3>
@@ -295,7 +297,8 @@ export function openModal(options) {
       foot.insertBefore(hint, foot.firstChild);
     }
 
-    layer.appendChild(modal);
+    layer.appendChild(shell);
+    shell.appendChild(modal);
     onMount?.(bodyEl, close);
 
     const onKey = (event) => {
