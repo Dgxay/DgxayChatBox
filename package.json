@@ -2,7 +2,7 @@
   "name": "dgxay-code",
   "productName": "DgxayCode",
   "version": "1.3.0",
-  "description": "DgxayCode - 一个简洁、明快的多模型 AI 桌面工作台",
+  "description": "DgxayCode",
   "author": "Dgxay",
   "license": "GPL-3.0-only",
   "main": "src/main/main.js",
