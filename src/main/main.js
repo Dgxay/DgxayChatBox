@@ -176,13 +176,18 @@ function applyGlobalShortcut() {
   }
 }
 
-function systemPromptFor({ mode, permission, workspace, customPrompt, skill }) {
+function systemPromptFor({ mode, permission, workspace, customPrompt, skill, agents = [] }) {
   const parts = [];
   parts.push(
     '你是 DgxayCode 桌面应用内置的 AI 助手。回答使用简体中文（除非用户使用其他语言），结构清晰，尽量简洁，合理使用 Markdown。'
   );
   if (skill?.content) {
     parts.push(`【本对话启用的技能：${skill.name}】\n${skill.content}`);
+  }
+  if (mode === 'work' && Array.isArray(agents) && agents.length) {
+    parts.push(
+      ['【本对话启用的 Agent】', ...agents.map((agent) => `• ${agent.name}：${agent.prompt}`)].join('\n')
+    );
   }
   if (customPrompt && String(customPrompt).trim()) {
     parts.push(`用户自定义指令：\n${String(customPrompt).trim()}`);
@@ -622,6 +627,56 @@ ipcMain.handle('chat:compress', async (_event, payload = {}) => {
   return { ok: true, summary, usage: result.usage || null };
 });
 
+const OPTIMIZE_SYSTEM = [
+  '你是提示词改写器。把用户给出的粗提示词改写为更精确、可执行的版本。',
+  '要求：保留原始意图、语言与所有专有名词；补全目标、范围、约束、输出格式；不要添加用户没有提到的新需求。',
+  '只输出改写后的提示词正文，不要解释、不要加引号、不要使用代码块围栏。'
+].join('\n');
+
+ipcMain.handle('chat:optimize-prompt', async (_event, payload = {}) => {
+  const config = cfg.readConfig();
+  // 主模型 = 配置列表中的第一个可用模型
+  const provider = (config.providers || []).find(
+    (item) => Array.isArray(item.models) && item.models.some((model) => model.id)
+  );
+  const primaryModel = provider?.models?.find((model) => model.id);
+  if (!provider || !primaryModel) throw new Error('请先在设置中配置供应商与模型，再使用提示词优化');
+
+  const original = String(payload.text || '').trim();
+  if (!original) throw new Error('输入框为空，无法优化');
+  if (original.length > 8000) throw new Error('提示词过长，请控制在 8000 字符以内');
+
+  const providerAuth = await resolveProviderAuth(provider);
+  const result = await streamChat({
+    protocol: provider.protocol || 'openai',
+    baseUrl: provider.baseUrl,
+    apiKey: providerAuth.apiKey,
+    authType: providerAuth.authType,
+    model: primaryModel.id,
+    messages: [
+      { role: 'system', content: OPTIMIZE_SYSTEM },
+      { role: 'user', content: original }
+    ],
+    stream: false,
+    temperature: 0.3,
+    maxTokens: Number(primaryModel.maxTokens) > 0 ? Math.min(Number(primaryModel.maxTokens), 2048) : 1024
+  });
+
+  let text = String(result.content || '').trim();
+  // 少数模型仍会包一层代码块，这里只在外层围栏成对出现时剥离
+  const fenced = text.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$/);
+  if (fenced) text = fenced[1].trim();
+  if (!text) throw new Error('模型没有返回优化结果，请稍后重试');
+
+  return {
+    ok: true,
+    text,
+    providerName: provider.name,
+    modelId: primaryModel.id,
+    modelName: primaryModel.name || primaryModel.id
+  };
+});
+
 ipcMain.handle('mcp:list', () => mcp.listServers());
 ipcMain.handle('mcp:add', (_event, input) => mcp.addServer(input || {}));
 ipcMain.handle('mcp:remove', (_event, id) => {
@@ -867,6 +922,15 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
   else if (permission !== 'none') toolDefs = [tools.DEFINITIONS.install_mcp_server];
   const skillName = typeof payload.skill === 'string' ? payload.skill.trim() : '';
   const activeSkill = skillName ? skills.readSkill(skillName) : null;
+  // Agent 只在工作模式生效：对话模式即使带了 ID 也忽略
+  const agentIds = Array.isArray(payload.agents) ? payload.agents : [];
+  const activeAgents =
+    mode === 'work'
+      ? agentIds
+          .map((id) => (config.agents || []).find((agent) => agent.id === id))
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
 
   const apiMessages = [
     {
@@ -876,7 +940,8 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
         permission,
         workspace,
         customPrompt: config.chat?.systemPrompt,
-        skill: activeSkill
+        skill: activeSkill,
+        agents: activeAgents
       })
     },
     ...normalizeHistory(payload.messages)
@@ -891,6 +956,9 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
   };
 
   const settings = config.chat || {};
+  // 模型级最大输出优先于通用设置；留空（0）时回落到通用设置
+  const modelConfig = (provider.models || []).find((item) => item.id === modelId);
+  const modelMaxTokens = Number(modelConfig?.maxTokens) > 0 ? Number(modelConfig.maxTokens) : 0;
   const providerAuth = await resolveProviderAuth(provider);
   let finalText = '';
   let reasoningText = '';
@@ -914,7 +982,7 @@ ipcMain.handle('chat:send', async (event, payload = {}) => {
         messages: apiMessages,
         tools: toolDefs,
         temperature: settings.temperature,
-        maxTokens: settings.maxTokens,
+        maxTokens: modelMaxTokens || settings.maxTokens,
         stream: settings.stream !== false,
         signal: controller.signal,
         onDelta: (text) => {

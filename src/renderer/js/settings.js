@@ -236,11 +236,12 @@ function maskKey(key) {
   return `${str.slice(0, 3)}••••••${str.slice(-4)}`;
 }
 
-function providerRow(id = '', name = '', contextWindow = '') {
+function providerRow(id = '', name = '', contextWindow = '', maxTokens = '') {
   return `<div class="model-row">
     <input class="input mono" data-field="id" value="${escapeHtml(id)}" placeholder="模型 ID，如 gpt-4o" spellcheck="false" />
     <input class="input" data-field="name" value="${escapeHtml(name)}" placeholder="显示名称（可选）" />
-    <input class="input mono" data-field="context" type="number" min="0" step="1000" value="${contextWindow || ''}" placeholder="128000" title="上下文窗口，留空则按协议默认" />
+    <input class="input mono" data-field="context" type="number" min="0" step="1000" value="${contextWindow || ''}" placeholder="128000" title="上下文长度，留空则按协议默认（ChatCompletions 128k / Anthropic、Responses 200k）" />
+    <input class="input mono" data-field="max" type="number" min="0" step="256" value="${maxTokens || ''}" placeholder="4096" title="最大输出 token，留空则使用「通用」里的最大回复长度" />
     <button class="mr-del" type="button" title="移除">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
@@ -353,9 +354,9 @@ async function openProviderEditor(provider) {
     </div>
     <div class="field">
       <label>模型列表 <span class="hint">可添加多个，对话时随时切换</span></label>
-      <div class="model-row-head"><span>模型 ID</span><span>显示名称</span><span>上下文窗口</span><span></span></div>
+      <div class="model-row-head"><span>模型 ID</span><span>显示名称</span><span>上下文长度</span><span>最大输出</span><span></span></div>
       <div class="model-rows" id="pvModels">${draft.models
-        .map((m) => providerRow(m.id, m.name, m.contextWindow))
+        .map((m) => providerRow(m.id, m.name, m.contextWindow, m.maxTokens))
         .join('')}</div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:9px;flex-wrap:wrap">
         <button class="btn btn-sm" type="button" id="pvAddModel">+ 添加模型</button>
@@ -390,10 +391,16 @@ async function openProviderEditor(provider) {
             .map((row) => ({
               id: row.querySelector('[data-field="id"]').value.trim(),
               name: row.querySelector('[data-field="name"]').value.trim(),
-              contextWindow: Number(row.querySelector('[data-field="context"]').value) || 0
+              contextWindow: Number(row.querySelector('[data-field="context"]').value) || 0,
+              maxTokens: Number(row.querySelector('[data-field="max"]').value) || 0
             }))
             .filter((m) => m.id)
-            .map((m) => ({ id: m.id, name: m.name || m.id, contextWindow: m.contextWindow }));
+            .map((m) => ({
+              id: m.id,
+              name: m.name || m.id,
+              contextWindow: m.contextWindow,
+              maxTokens: m.maxTokens
+            }));
 
           if (!/^https?:\/\//i.test(baseUrl)) {
             errEl.textContent = '请填写以 http:// 或 https:// 开头的 Base URL';
@@ -1351,7 +1358,7 @@ function renderData() {
         </div>
       </div>
       <div class="kv-list">
-        <dt>版本</dt><dd>V1.3（${escapeHtml(info.version || '1.3.0')}）</dd>
+        <dt>版本</dt><dd>V1.4（${escapeHtml(info.version || '1.4.0')}）</dd>
         <dt>运行环境</dt><dd>Electron · ${escapeHtml(info.platform || 'win32')}</dd>
         <dt>接口协议</dt><dd>ChatCompletions · Anthropic Messages · Responses</dd>
         <dt>配置文件</dt><dd>~/.dcb/config.json</dd>

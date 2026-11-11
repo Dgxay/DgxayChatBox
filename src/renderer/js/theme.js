@@ -44,7 +44,7 @@ export function initTheme(info) {
 }
 
 export function applyTheme(value) {
-  preference = THEME_OPTIONS.some((item) => item.value === value) ? value : 'system';
+  preference = THEME_OPTIONS.some((item) => item.value === value) ? value : 'dark';
   paint();
   return resolve();
 }

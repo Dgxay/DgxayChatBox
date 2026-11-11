@@ -21,6 +21,9 @@ import {
   availablePermissions,
   providers,
   setActiveModel,
+  agents,
+  agentById,
+  activeAgents,
   emit,
   on
 } from './store.js';
@@ -29,10 +32,12 @@ import {
   escapeHtml,
   toast,
   openMenu,
+  openModal,
   formatTime,
   formatRelative,
   confirmDialog,
-  copyText
+  copyText,
+  uid
 } from './ui.js';
 import { renderMarkdown } from './markdown.js';
 import { icons, toolIcons, toolLabels } from './icons.js';
@@ -42,6 +47,7 @@ import { applyWidowGuard } from './typography.js';
 let messagesEl;
 let inputEl;
 let sendBtn;
+let optimizeBtn;
 let modelBtn;
 let ctxRing;
 let ctxRingProgress;
@@ -51,6 +57,7 @@ let autoResizing = false;
 let paintQueued = false;
 let streamingMsg = null;
 let terminalBusy = false;
+let optimizing = false;
 let slashEntries = [];
 let slashIndex = 0;
 let slashMode = 'commands';
@@ -80,6 +87,7 @@ export function initChat() {
   messagesEl = $('#messages');
   inputEl = $('#input');
   sendBtn = $('#sendBtn');
+  optimizeBtn = $('#optimizeBtn');
   modelBtn = $('#modelBtn');
   ctxRing = $('#ctxRing');
   ctxRingProgress = $('#ctxRingProgress');
@@ -89,6 +97,7 @@ export function initChat() {
   inputEl.addEventListener('input', () => {
     autosize();
     updateSendButton();
+    updateOptimizeButton();
     updateComposerHint();
     updateSlashMenu();
   });
@@ -123,6 +132,9 @@ export function initChat() {
   });
 
   modelBtn.addEventListener('click', openModelMenu);
+  optimizeBtn?.addEventListener('click', optimizePrompt);
+  $('#agentAdd')?.addEventListener('click', openAgentPicker);
+  $('#agentList')?.addEventListener('click', handleAgentChipClick);
 
   messagesEl.addEventListener('click', handleMessageClick);
   messagesEl.addEventListener('scroll', () => {
@@ -187,6 +199,7 @@ export function refreshChrome() {
   if (btnWs) btnWs.hidden = !currentWorkspace() || mode !== 'work';
 
   updateSendButton();
+  updateOptimizeButton();
   refreshWorkBar();
 }
 
@@ -570,6 +583,48 @@ function refreshWorkBar() {
     btn.classList.toggle('active', btn.dataset.perm === perm);
     btn.setAttribute('aria-checked', String(btn.dataset.perm === perm));
   });
+
+  refreshAgentBar();
+}
+
+function refreshAgentBar() {
+  const list = $('#agentList');
+  if (!list) return;
+  if (currentMode() !== 'work') {
+    list.innerHTML = '';
+    return;
+  }
+  const selected = activeAgents();
+  list.innerHTML = selected.length
+    ? selected
+        .map(
+          (agent) => `
+      <button class="ws-chip agent-chip" data-agent-chip="${escapeHtml(agent.id)}" title="${escapeHtml(agent.prompt)}">
+        ${icons.spark}<span>${escapeHtml(agent.name)}</span>
+        <span class="wc-x" data-agent-remove="${escapeHtml(agent.id)}" title="停用该 Agent">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </span>
+      </button>`
+        )
+        .join('')
+    : `<span class="wb-empty">未启用 Agent</span>`;
+}
+
+function handleAgentChipClick(event) {
+  const remove = event.target.closest('[data-agent-remove]');
+  if (remove) {
+    event.stopPropagation();
+    const id = remove.dataset.agentRemove;
+    const chat = getChat();
+    if (!chat) return;
+    chat.agents = (chat.agents || []).filter((item) => item !== id);
+    chat.updatedAt = Date.now();
+    refreshAgentBar();
+    refreshChrome();
+    scheduleChatSave();
+    return;
+  }
+  if (event.target.closest('[data-agent-chip]')) openAgentPicker();
 }
 
 function updateSendButton() {
@@ -579,7 +634,196 @@ function updateSendButton() {
   sendBtn.querySelector('.i-stop').hidden = !state.streaming;
   sendBtn.title = state.streaming ? '停止生成' : '发送';
   sendBtn.disabled =
-    compressing || terminalBusy || (!state.streaming && !(inputEl?.value || '').trim());
+    optimizing || compressing || terminalBusy || (!state.streaming && !(inputEl?.value || '').trim());
+}
+
+/* ------------------------------ 提示词优化 ------------------------------ */
+
+function primaryModelLabel() {
+  const provider = providers().find((item) => (item.models || []).some((model) => model.id));
+  const model = provider?.models?.find((item) => item.id);
+  if (!model) return '';
+  return `${provider.name} · ${model.name || model.id}`;
+}
+
+function updateOptimizeButton() {
+  if (!optimizeBtn) return;
+  const text = (inputEl?.value || '').trim();
+  // 终端命令与斜杠命令交给本地逻辑处理，不送模型改写
+  const isCommand = text.startsWith('!') || text.startsWith('/');
+  optimizeBtn.disabled = optimizing || state.streaming || compressing || terminalBusy || !text || isCommand;
+  optimizeBtn.classList.toggle('busy', optimizing);
+  const target = primaryModelLabel();
+  optimizeBtn.title = optimizing
+    ? '正在优化提示词…'
+    : isCommand
+      ? '终端命令与斜杠命令不支持优化'
+      : target
+        ? `优化提示词（${target}）`
+        : '优化提示词（请先配置模型）';
+}
+
+async function optimizePrompt() {
+  if (optimizing || state.streaming) return;
+  const text = (inputEl.value || '').trim();
+  if (!text) return;
+  if (text.startsWith('!') || text.startsWith('/')) {
+    toast('终端命令与斜杠命令不支持优化', 'warn');
+    return;
+  }
+
+  optimizing = true;
+  updateOptimizeButton();
+  updateSendButton();
+  try {
+    const result = await window.dcb.optimizePrompt({ text });
+    if ((inputEl.value || '').trim() !== text) {
+      toast('输入内容已改变，未覆盖当前提示词', 'warn');
+      return;
+    }
+    inputEl.value = result.text;
+    autosize();
+    updateSendButton();
+    updateComposerHint();
+    inputEl.focus();
+    inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+    toast(`已由 ${result.modelName || result.modelId} 优化提示词`);
+  } catch (err) {
+    toast(err?.message || '优化失败，请稍后重试', 'error');
+  } finally {
+    optimizing = false;
+    updateOptimizeButton();
+    updateSendButton();
+  }
+}
+
+/* ------------------------------ Agent ------------------------------ */
+
+async function openAgentPicker() {
+  if (state.streaming) {
+    toast('请等待当前回复结束', 'warn');
+    return;
+  }
+  const chat = ensureChat();
+  const selected = new Set(Array.isArray(chat.agents) ? chat.agents : []);
+
+  const rowsHtml = () => {
+    const list = agents();
+    if (!list.length) return '<p class="form-note">还没有可用 Agent，可以先创建一个。</p>';
+    return list
+      .map(
+        (agent) => `
+      <label class="agent-row">
+        <input type="checkbox" data-agent-pick="${escapeHtml(agent.id)}" ${selected.has(agent.id) ? 'checked' : ''} />
+        <span class="agent-meta">
+          <b>${escapeHtml(agent.name)}${agent.builtin ? '<i>内置</i>' : ''}</b>
+          <em>${escapeHtml(agent.desc || agent.prompt)}</em>
+        </span>
+        ${
+          agent.builtin
+            ? ''
+            : `<button class="agent-del" type="button" data-agent-del="${escapeHtml(agent.id)}" title="删除该 Agent">×</button>`
+        }
+      </label>`
+      )
+      .join('');
+  };
+
+  const result = await openModal({
+    title: 'Agent',
+    desc: '可同时启用多个 Agent，职责会注入系统提示；仅在<strong>工作模式</strong>生效，且只作用于当前对话。',
+    width: 'wide',
+    body: `
+      <div class="agent-list" id="agentPickList">${rowsHtml()}</div>
+      <button class="btn btn-sm" type="button" id="agentNewToggle">+ 新建 Agent</button>
+      <div class="agent-form" id="agentNewForm" hidden>
+        <input class="input" id="agentNewName" placeholder="Agent 名称，例如 数据助手" maxlength="24" />
+        <textarea class="input" id="agentNewPrompt" rows="3" placeholder="描述它的职责与工作方式，例如：先检查数据结构，再用脚本完成清洗并输出结果。"></textarea>
+        <div class="agent-form-foot">
+          <span class="form-error" id="agentNewErr"></span>
+          <button class="btn btn-primary btn-sm" type="button" id="agentNewSave">创建并启用</button>
+        </div>
+      </div>
+    `,
+    actions: [
+      { label: '取消', value: null },
+      { label: '应用', variant: 'primary', value: true }
+    ],
+    onMount: (bodyEl) => {
+      const listEl = bodyEl.querySelector('#agentPickList');
+      const formEl = bodyEl.querySelector('#agentNewForm');
+
+      listEl.addEventListener('change', (event) => {
+        const box = event.target.closest('[data-agent-pick]');
+        if (!box) return;
+        if (box.checked) selected.add(box.dataset.agentPick);
+        else selected.delete(box.dataset.agentPick);
+      });
+
+      listEl.addEventListener('click', async (event) => {
+        const del = event.target.closest('[data-agent-del]');
+        if (!del) return;
+        event.preventDefault();
+        const target = agentById(del.dataset.agentDel);
+        if (!target || target.builtin) return;
+        await patchConfig({ agents: agents().filter((agent) => agent.id !== target.id) });
+        selected.delete(target.id);
+        listEl.innerHTML = rowsHtml();
+        toast(`已删除 Agent：${target.name}`);
+      });
+
+      bodyEl.querySelector('#agentNewToggle').addEventListener('click', () => {
+        formEl.hidden = !formEl.hidden;
+        if (!formEl.hidden) bodyEl.querySelector('#agentNewName').focus();
+      });
+
+      bodyEl.querySelector('#agentNewSave').addEventListener('click', async (event) => {
+        const nameEl = bodyEl.querySelector('#agentNewName');
+        const promptEl = bodyEl.querySelector('#agentNewPrompt');
+        const errEl = bodyEl.querySelector('#agentNewErr');
+        const name = nameEl.value.trim();
+        const prompt = promptEl.value.trim();
+        if (!name) {
+          errEl.textContent = '请填写 Agent 名称';
+          return;
+        }
+        if (!prompt) {
+          errEl.textContent = '请填写职责说明';
+          return;
+        }
+        if (agents().some((agent) => agent.name === name)) {
+          errEl.textContent = '已存在同名 Agent';
+          return;
+        }
+        errEl.textContent = '';
+        const saveBtn = event.currentTarget;
+        saveBtn.disabled = true;
+        const created = { id: uid('agent'), name, desc: '', prompt, builtin: false };
+        await patchConfig({ agents: [...agents(), created] });
+        selected.add(created.id);
+        nameEl.value = '';
+        promptEl.value = '';
+        formEl.hidden = true;
+        listEl.innerHTML = rowsHtml();
+        saveBtn.disabled = false;
+        toast(`已创建 Agent：${name}`);
+      });
+    }
+  });
+
+  if (!result) {
+    refreshAgentBar();
+    return;
+  }
+  const current = ensureChat();
+  current.agents = agents()
+    .filter((agent) => selected.has(agent.id))
+    .map((agent) => agent.id);
+  current.updatedAt = Date.now();
+  refreshAgentBar();
+  refreshChrome();
+  scheduleChatSave();
+  toast(current.agents.length ? `已启用 ${current.agents.length} 个 Agent` : '已停用全部 Agent');
 }
 
 function autosize() {
@@ -1340,6 +1584,7 @@ export async function sendMessage() {
       modelId: model.id,
       messages: history,
       skill: chat.skill || '',
+      agents: mode === 'work' ? chat.agents || [] : [],
       mode,
       permission: currentPermission(),
       workspace: currentWorkspace()

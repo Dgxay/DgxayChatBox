@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('dcb', {
 
   listSkills: () => ipcRenderer.invoke('skills:list'),
   compressContext: (payload) => ipcRenderer.invoke('chat:compress', payload),
+  optimizePrompt: (payload) => ipcRenderer.invoke('chat:optimize-prompt', payload),
 
   oauthList: () => ipcRenderer.invoke('oauth:list'),
   oauthSaveClient: (payload) => ipcRenderer.invoke('oauth:save-client', payload),

@@ -1,7 +1,7 @@
 # DgxayCode 项目注意事项
 
-适用版本：**V1.3（1.3.0）**  
-最后更新：2026-11-09  
+适用版本：**V1.4（1.4.0）**  
+最后更新：2026-11-11  
 配套文档：[README-zh.md](./README-zh.md)、[README.md](./README.md)
 
 本文汇总开发、调试、日常使用与打包发布全过程中容易踩坑的地方。开始改代码或分发安装包前，建议先通读第 3、4、10、11 节。
@@ -78,7 +78,7 @@ npm run dev    # 启动并打开开发者工具
 
 ```
 .dcb/
-├── config.json   # 供应商、模型、审查模型、模式、快捷键
+├── config.json   # 供应商、模型、审查模型、Agent、模式、快捷键
 ├── chats.json    # 对话历史、技能、终端输出
 ├── oauth.json    # OAuth 客户端配置与账户令牌
 ├── mcp.json      # MCP server 配置
@@ -169,6 +169,7 @@ DCB_HOME=/tmp/dcb-test npm start
 - 模型列表接口不是所有网关都支持；拉取失败时允许手动填写模型 ID，不要把它当阻断错误。
 - 切换协议后原有模型 ID 可能不再存在，需要重新填写或重新拉取。
 - 模型的 `contextWindow` 只影响上下文圆环的**估算**，不会改变服务端真实上限。留空时 ChatCompletions 按 128k、Anthropic / Responses 按 200k 估算。
+- 模型可单独配置 `maxTokens`（最大输出）；留空或为 0 时回落到「通用 → 最大回复长度」。上下文长度与最大输出都在「编辑供应商 → 模型列表」里按模型填写，切换模型即生效。
 - 上下文环按字符启发式估算（中文约 1 字符 1 token），不是真实计费 token；以响应里的 `usage` 为准。
 - 对话模式最多 8 轮工具循环；工作模式最多 24 轮，并最多自动续跑 2 次。达到上限会停止，长任务需要拆分成多次对话。
 - **每次请求只发送最近 24 条消息**（`slice(-24)`）。更早的内容会被静默丢弃，长对话应先 `/压缩` 或另起会话。
@@ -247,6 +248,14 @@ DCB_HOME=/tmp/dcb-test npm start
 - 上下文接近上限时优先 `/压缩`，或新建对话；仅靠圆环不会自动截断历史。
 - 发送按钮在输入为空、终端执行中、压缩中会禁用；流式生成时变为停止按钮。
 - 回车发送受「发送方式」设置影响；输入法组合期间不会误发送。
+- 发送按钮左侧的「优化提示词」只在输入框有内容时可用，点击后调用**配置列表里的第一个模型**（`providers[0].models[0]`，第一个供应商没有模型时顺延）改写当前输入。改写结果直接覆盖输入框；请求期间用户又改了输入会放弃覆盖并提示。终端命令（`!`）与斜杠命令不会被优化。
+
+### 8.4 Agent（仅工作模式）
+
+- Agent 是可复用的角色说明，支持多选；启用的职责会拼进系统提示的「本对话启用的 Agent」段，位置在技能之后、自定义指令之前。
+- 选择与创建入口在工作栏的「Agent → 选择」；内置 Agent 不可删除，自建 Agent 写入 `config.json` 的 `agents`，可删除。
+- Agent 选择随对话保存在 `chats.json`；对话模式即使保留选择也不会注入，切回工作模式后重新生效。
+- 单个对话最多注入 6 个 Agent，按选择顺序；增加 Agent 会显著增加系统提示长度，长任务前先用 `/压缩` 腾出空间。
 
 ---
 
@@ -271,7 +280,7 @@ DCB_HOME=/tmp/dcb-test npm start
 
 - 视觉基线：ChatGPT / Claude 风格界面，**单一蓝色强调色 `#2563EB`**；不要引入紫色、渐变或多种高饱和强调色。
 - **层级靠微对比色阶**：`--l0`～`--l4` 每层只差 1%～3% 明度，大容器一律用底色分层，不要加回描边和重阴影。圆角处不要画 1px 边框——连续曲率裁切会把边框在转角切断。
-- **主题**：浅色 / 深色 / 跟随系统，token 定义在 `:root` 与 `:root[data-theme='dark']` 两套里。深色底色不用纯黑（`--l0: #1b1c1f`），字重通过 `--fw-1`～`--fw-6` 统一下调 40。新增颜色必须走 token，不要写死十六进制，否则深色模式会露出亮色斑块。
+- **主题**：默认深色，可在设置里切换为浅色 / 跟随系统；token 定义在 `:root` 与 `:root[data-theme='dark']` 两套里。深色底色不用纯黑（`--l0: #1b1c1f`），字重通过 `--fw-1`～`--fw-6` 统一下调 40。新增颜色必须走 token，不要写死十六进制，否则深色模式会露出亮色斑块。
 - **连续曲率圆角**：`squircle.js` 用超椭圆 path 裁切 `.composer`、`.card`、`.menu`、`.modal` 等大圆角容器。被裁切元素的 `box-shadow` 会一起被裁掉，浮层阴影要放到父级 `filter: drop-shadow()`（`.menu-layer`、`.toast-layer`、`.modal-shell`、`.ob-wrap`）。可聚焦控件不做裁切，保留原生 outline。
 - 所有数字通过仅覆盖 `U+0030-0039` 的 `@font-face` 使用等宽字形（Consolas / SF Mono / JetBrains Mono / DejaVu Sans Mono）；正文字体保持不变。新增数字展示时不需要额外设置字体；需要严格等宽的地方（思考计时器）再加 `font-variant-numeric: tabular-nums` 与最小宽度。
 - 字体全部本地加载，不依赖网络；不要改成 Google Fonts 等远程字体（CSP 也会拦截）。
@@ -291,7 +300,7 @@ DCB_HOME=/tmp/dcb-test npm start
 
 ### 11.1 版本号要改全
 
-版本号不是单一来源，至少检查以下位置（可直接全局搜索 `1.3.0` / `V1.3`）：
+版本号不是单一来源，至少检查以下位置（可直接全局搜索 `1.4.0` / `V1.4`）：
 
 - `package.json` → `version`
 - `package-lock.json` → 根 `version` 与 `packages[""].version`
@@ -336,7 +345,7 @@ xattr -cr /Applications/DgxayCode.app
 ```
 
 - 安装脚本会在本机做 ad-hoc 签名；没有 Apple Developer ID，无法彻底避免 Gatekeeper 提示。
-- 正式 DMG 需在 macOS 上运行 `npm run dist:mac`，或使用仓库的 `macos-14` GitHub Actions。
+- 正式 DMG 需在 macOS 上运行 `npm run dist:mac`。
 - electron-packager 可能提示找不到 `build/icon.icns`（因为工作目录不是项目根）；`make-mac-zip.py` 会把图标写入 `Contents/Resources` 并设置 `CFBundleIconFile`，打包后应确认 zip 内含 `icon.icns`。
 
 ### 11.5 Linux
@@ -353,9 +362,8 @@ python scripts/make-deb.py
 - 安装：`sudo apt install ./DgxayCode-<version>-amd64.deb`；依赖缺失时 `sudo apt -f install`。
 - 不要用 `dpkg -i` 跳过依赖解析，除非明确知道缺什么。
 
-### 11.6 CI 与图标
+### 11.6 图标与打包清理
 
-- `.github/workflows/build.yml` 在 `windows-latest`、`macos-14`、`ubuntu-22.04` 上构建并上传产物；Linux 步骤同样使用 `--linux dir` + `make-deb.py`。
 - 图标由 `scripts/make_icons.py` 生成 `build/icon.png`、`icon.ico`、`icon.icns` 与渲染层图标；换配色或图形后必须重新运行，否则安装包仍是旧图标。
 - 打包前建议 `npm ci` 并确认 `dist/`、`.test/`、`.tmp-*` 已清理，避免把测试文件带进 asar。
 

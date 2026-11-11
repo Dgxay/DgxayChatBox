@@ -153,7 +153,7 @@ function applyConfigUI() {
   document.body.dataset.accent = config.ui?.accent === 'coral' || !config.ui?.accent ? 'blue' : config.ui.accent;
   document.body.dataset.mode = config.ui?.mode === 'work' ? 'work' : 'chat';
   document.documentElement.style.setProperty('--font-scale', String(config.ui?.fontScale || 1));
-  applyTheme(config.ui?.theme || 'system');
+  applyTheme(config.ui?.theme || 'dark');
 
   $$('#modeSwitch button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === (config.ui?.mode || 'chat'));
@@ -165,7 +165,7 @@ function applyConfigUI() {
   const kbdSet = $('#kbdSettings');
   if (kbdSet) kbdSet.textContent = config.shortcuts?.settings || '';
   const ver = $('#setVersion');
-  if (ver && state.info) ver.textContent = 'V1.3';
+  if (ver && state.info) ver.textContent = 'V1.4';
 
   // 自动审查模式只在已配置审查模型时可用，移除配置后回落到普通权限
   if (config.ui?.permission === 'auto' && !hasReviewModel() && !autoFallbackPending) {

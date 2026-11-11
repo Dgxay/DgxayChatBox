@@ -167,6 +167,25 @@ export function currentMode() {
   return state.config?.ui?.mode === 'work' ? 'work' : 'chat';
 }
 
+/* ------------------------------ Agent ------------------------------ */
+
+export function agents() {
+  return state.config?.agents || [];
+}
+
+export function agentById(id) {
+  return agents().find((agent) => agent.id === id) || null;
+}
+
+export function activeAgentIds() {
+  const list = getChat()?.agents;
+  return Array.isArray(list) ? list : [];
+}
+
+export function activeAgents() {
+  return activeAgentIds().map(agentById).filter(Boolean);
+}
+
 /* ------------------------------ 会话 ------------------------------ */
 
 export function getChat(id = state.activeChatId) {
@@ -181,6 +200,7 @@ export function ensureChat() {
     title: '新对话',
     mode: currentMode(),
     skill: '',
+    agents: [],
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -198,6 +218,7 @@ export function createNewChat() {
     title: '新对话',
     mode: currentMode(),
     skill: '',
+    agents: [],
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -242,6 +263,7 @@ export function persistChatsNow() {
       title: c.title,
       mode: c.mode,
       skill: c.skill || '',
+      agents: c.agents?.length ? c.agents : undefined,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
       messages: c.messages.map((m) => ({

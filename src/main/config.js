@@ -27,10 +27,45 @@ const DEFAULT_CONFIG = {
     mode: 'chat',
     permission: 'normal',
     accent: 'blue',
-    theme: 'system',
+    theme: 'dark',
     fontScale: 1,
     showSidebar: true
   },
+  // Agent 仅在工作模式下注入系统提示；builtin 为 true 的条目不允许删除
+  agents: [
+    {
+      id: 'agent-planner',
+      name: '规划者',
+      desc: '先拆解任务，再动手',
+      prompt:
+        '收到目标后先拆成可验证的步骤，说明每一步要读写的文件或命令，再按顺序执行；遇到不确定的信息先读文件核对，不要凭印象假设。',
+      builtin: true
+    },
+    {
+      id: 'agent-engineer',
+      name: '工程师',
+      desc: '最小改动，保证可运行',
+      prompt:
+        '动手前先读现有实现与项目约定，优先最小改动而不是重写；代码要能直接运行，改完自查语法、边界条件与调用方。',
+      builtin: true
+    },
+    {
+      id: 'agent-reviewer',
+      name: '审查者',
+      desc: '挑错优先于完成',
+      prompt:
+        '以审查视角检查每一步产出：正确性、安全性、边界条件、遗漏项。发现问题立即指出并给出修复方案，不要为了让任务“看起来完成”而忽略风险。',
+      builtin: true
+    },
+    {
+      id: 'agent-writer',
+      name: '文档写手',
+      desc: '结构化中文输出',
+      prompt:
+        '输出结构清晰的中文内容，先给结论再给细节；保留关键文件路径、命令与参数，避免空话和重复描述。',
+      builtin: true
+    }
+  ],
   work: {
     workspace: '',
     recentWorkspaces: []
@@ -101,6 +136,11 @@ function readConfig() {
     // 旧版本使用珊瑚色作为主题色，现统一为蓝色（V1.2 之前的配置读取时自动迁移）
     if (!merged.ui) merged.ui = { ...base.ui };
     if (!merged.ui.accent || merged.ui.accent === 'coral') merged.ui.accent = 'blue';
+    // 默认主题改为深色：旧配置里由旧默认写入的 system 只迁移一次，之后用户仍可自行改回
+    if (merged.ui.theme === 'system' && !merged.ui.themeMigrated) {
+      merged.ui.theme = 'dark';
+    }
+    merged.ui.themeMigrated = true;
     merged.meta = {
       ...merged.meta,
       createdAt: merged.meta?.createdAt || new Date().toISOString(),

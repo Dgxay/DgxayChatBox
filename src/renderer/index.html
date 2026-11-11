@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="color-scheme" content="light dark" />
@@ -121,6 +121,9 @@
                     <span class="mp-name" id="modelBtnName">选择模型</span>
                     <svg class="mp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5" /></svg>
                   </button>
+                  <button class="optimize-btn" id="optimizeBtn" title="优化提示词" aria-label="优化提示词" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8L12 3.5Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg>
+                  </button>
                   <button class="send-btn" id="sendBtn" title="发送" aria-label="发送">
                     <svg class="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M12 5l-6 6M12 5l6 6" /></svg>
                     <svg class="i-stop" viewBox="0 0 24 24" hidden><rect x="7.5" y="7.5" width="9" height="9" rx="2" fill="currentColor" /></svg>
@@ -130,6 +133,14 @@
             </div>
 
             <div class="work-bar" id="workBar" hidden>
+              <div class="wb-group wb-agents">
+                <span class="wb-label">Agent</span>
+                <div class="ws-list" id="agentList"></div>
+                <button class="ws-add" id="agentAdd" title="选择或创建 Agent">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  选择
+                </button>
+              </div>
               <div class="wb-group wb-workspace">
                 <span class="wb-label">工作空间</span>
                 <div class="ws-list" id="wsList"></div>
@@ -183,7 +194,7 @@
                 数据与关于
               </button>
             </nav>
-            <div class="set-side-foot">DgxayCode <span id="setVersion">V1.3</span></div>
+            <div class="set-side-foot">DgxayCode <span id="setVersion">V1.4</span></div>
           </div>
           <div class="set-main">
             <header class="set-head">
