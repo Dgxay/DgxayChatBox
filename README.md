@@ -1,4 +1,4 @@
-# DgxayCode V1.4
+# DgxayCode V1.4.1
 
 A clean, local-first multi-model AI desktop workspace built with Electron. Chat with any supported provider, hand file and terminal work to the model under a reviewed permission system, and keep full control over what runs on your machine.
 
