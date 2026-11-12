@@ -1347,11 +1347,7 @@ function renderData() {
 
     <div class="card">
       <div class="about-box">
-        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="#2563EB"/>
-          <path d="M9.4 10.4h13.2a2.4 2.4 0 0 1 2.4 2.4v5.8a2.4 2.4 0 0 1-2.4 2.4h-5.8l-3.6 2.9c-.7.6-1.8.1-1.8-.8v-2.1H9.4a2.4 2.4 0 0 1-2.4-2.4v-5.8a2.4 2.4 0 0 1 2.4-2.4Z" fill="#fff"/>
-          <circle cx="12.6" cy="15.7" r="1.15" fill="#2563EB"/><circle cx="16.6" cy="15.7" r="1.15" fill="#2563EB"/><circle cx="20.6" cy="15.7" r="1.15" fill="#2563EB"/>
-        </svg>
+        <img class="logo logo-wordmark" src="assets/logo-wordmark.png" alt="" aria-hidden="true" />
         <div>
           <h3>DgxayCode</h3>
           <p>一个简洁、明快的多模型 AI 桌面工作台。数据留在本地，权限由你掌握。</p>

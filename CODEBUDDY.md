@@ -51,7 +51,7 @@ npm run pack        # 仅解包目录，用于检查 asar 内容
 
 Windows 上产出 Linux 包：`npx electron-builder --linux dir --x64` 后执行 `python scripts/make-deb.py`（该脚本保留 `chrome-sandbox` 的 setuid）。Windows 上产出 macOS 便携 zip：`@electron/packager` 生成 `arm64 .app` 后执行 `python scripts/make-mac-zip.py`（非 DMG、未签名）。
 
-图标：修改 `scripts/make_icons.py` 后重新运行 `python scripts/make_icons.py`，生成 `build/icon.{png,ico,icns}` 与渲染层图标；否则安装包仍是旧图标。
+图标：运行 `python scripts/make_icons.py` 从 `build/icon-master.png`（缺失时自动从 `build/icon.ico` 最大帧提取）生成 `build/icon.{png,ico,icns}`、`src/renderer/assets/{icon.png,icon.ico,logo-mark.png,logo-wordmark.png}`。OS 图标是「浅色圆角底板 + 黑字标」，≤64px 用「D.」单字、≥128px 用完整 D.AI；界面内 `logo-*.png` 保持透明，由 CSS 在深色主题反相。改字标只需替换母版后重跑脚本。
 
 ## 架构
 

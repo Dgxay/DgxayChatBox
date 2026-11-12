@@ -321,12 +321,16 @@ body.ready .app {
   letter-spacing: -0.01em;
 }
 
+/* 品牌标记：透明黑字标位图，深色主题反相为白，尺寸由各上下文固定 */
 .logo {
   width: 21px;
   height: 21px;
-  border-radius: 6px;
+  object-fit: contain;
   display: block;
   flex: 0 0 auto;
+}
+:root[data-theme='dark'] .logo {
+  filter: invert(1);
 }
 
 .tb-name {
@@ -3110,10 +3114,9 @@ input[type='range']:active::-webkit-slider-thumb {
   padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
 }
-.about-box .logo {
-  width: 32px;
+.about-box .logo-wordmark {
+  width: auto;
   height: 32px;
-  border-radius: 9px;
 }
 .about-box h3 {
   margin: 0 0 3px;
@@ -3338,7 +3341,6 @@ input[type='range']:active::-webkit-slider-thumb {
 .ob-brand .logo {
   width: 24px;
   height: 24px;
-  border-radius: 7px;
 }
 .ob-steps {
   display: flex;
