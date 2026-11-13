@@ -3,7 +3,7 @@
 
 用法：
     python scripts/make-deb.py
-    python scripts/make-deb.py --app-dir dist/linux-unpacked --out dist/DgxayCode-1.4.0-amd64.deb
+    python scripts/make-deb.py --app-dir dist/linux-unpacked --out dist/DgxayCode-1.4.1-amd64.deb
 """
 import argparse
 import gzip

@@ -1,4 +1,4 @@
-# DgxayCode V1.4
+# DgxayCode V1.4.1
 
 A clean, local-first multi-model AI desktop workspace built with Electron. Chat with any supported provider, hand file and terminal work to the model under a reviewed permission system, and keep full control over what runs on your machine.
 
@@ -25,7 +25,7 @@ A clean, local-first multi-model AI desktop workspace built with Electron. Chat 
 
 Base URL can be a bare host (`https://api.anthropic.com`), a versioned root (`https://api.openai.com/v1`) or a full endpoint. Tool calls are converted per protocol, so Work mode behaves the same across all three.
 
-## Permission model (V1.4)
+## Permission model (V1.4.1)
 
 | Capability | None | Normal | Auto-review | Full |
 | --- | --- | --- | --- | --- |
