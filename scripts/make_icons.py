@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""由 D.AI 字标母版生成应用图标与界面品牌标记，无第三方依赖。
+"""由品牌图标母版生成全平台应用图标与界面品牌标记，无第三方依赖。
 
-母版：build/icon-master.png（透明背景、纯黑字标）。
-若母版不存在，首次运行会从 build/icon.ico 的最大 PNG 帧中提取并裁剪。
+母版：build/icon-master.png（256×256，纯黑方形底 + 白色几何字标）。
+换标：把新的 .ico 放到 build/icon-source.ico（或直接替换母版 PNG）后重跑本脚本。
 
 产物：
   build/icon.png / icon.ico / icon.icns          # 打包用
   src/renderer/assets/icon.png / icon.ico        # 窗口与渲染层图标
-  src/renderer/assets/logo-mark.png              # 「D.」单字，小尺寸与标题栏
-  src/renderer/assets/logo-wordmark.png          # 完整 D.AI，关于页
+  src/renderer/assets/logo-mark.png              # 透明字标，标题栏与引导页
+  src/renderer/assets/logo-wordmark.png          # 透明字标，关于卡片
 
-尺寸规则：<=64px 使用「D.」单字保证可读；>=128px 使用完整字标。
-系统图标叠加浅色圆角底板（OS_PLATE），界面内的 logo-*.png 保持透明并由 CSS 反相。
+尺寸策略：16–256 优先取源 ICO 的原生帧（作者已针对小尺寸调过笔画粗细），
+512/1024 由 256 帧放大后做边缘锐化重建。系统图标叠加圆角遮罩（TILE_RADIUS），
+界面标记抠成「透明底 + 黑色字标」，由 CSS 按主题反相，不再单独为深色切图。
 """
 import math
 import os
@@ -22,18 +23,24 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")
 ASSETS = os.path.join(ROOT, "src", "renderer", "assets")
 MASTER = os.path.join(BUILD, "icon-master.png")
-ICO_SOURCE = os.path.join(BUILD, "icon.ico")
+SOURCE_ICO = os.path.join(BUILD, "icon-source.ico")
 
-# 系统图标：浅色圆角底板 + 黑色字标，保证在深色任务栏/桌面上仍然可见。
-# 若想回到纯透明字标，把 OS_PLATE 改为 False 即可。
-OS_PLATE = True
-PLATE_COLOR = (241, 241, 238)
-PLATE_RADIUS = 0.225
+# 系统图标圆角比例（相对画布边长）。源文件是直角方块，桌面与任务栏上略带圆角
+# 更像一个应用图标；改 0 即回到原始直角，其他产物无需调整。
+TILE_RADIUS = 0.18
+MASTER_SIZE = 256
 
-# 字标在底板中的占比：完整字标偏宽，单字接近方形
-WORDMARK_RATIO = 0.80
-MARK_RATIO = 0.66
-MONOGRAM_MAX = 64  # 该尺寸及以下使用单字，以上使用完整字标
+ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+ICNS_TYPES = [
+    (16, b"icp4"),
+    (32, b"icp5"),
+    (64, b"icp6"),
+    (128, b"ic07"),
+    (256, b"ic08"),
+    (512, b"ic09"),
+    (1024, b"ic10"),
+]
+LOGOS = {"logo-mark.png": 0.07, "logo-wordmark.png": 0.12}
 
 
 # ------------------------------- PNG 读写 -------------------------------
@@ -134,13 +141,14 @@ def icns_bytes(entries):
     return b"icns" + struct.pack(">I", 8 + len(body)) + body
 
 
-def extract_master_from_ico(path):
-    """从 ICO 中取最大 PNG 帧，裁剪到墨迹范围后作为母版。"""
+def read_ico_frames(path):
+    """读出 ICO 内所有 PNG 帧，返回 {边长: (w, h, rgba)}。"""
     data = open(path, "rb").read()
     _reserved, kind, count = struct.unpack("<HHH", data[:6])
     if kind != 1:
-        raise ValueError("build/icon.ico 不是有效图标文件")
-    best = None
+        raise ValueError(f"{path} 不是有效图标文件")
+    frames = {}
+    temp = os.path.join(BUILD, ".icon-frame.png")
     for index in range(count):
         off = 6 + index * 16
         width, height, _c, _r, _p, _bpp, size, img_off = struct.unpack(
@@ -148,190 +156,101 @@ def extract_master_from_ico(path):
         )
         if data[img_off:img_off + 8] != b"\x89PNG\r\n\x1a\n":
             continue
-        if best is None or (width or 256) > best[0]:
-            best = ((width or 256), data[img_off:img_off + size])
-    if not best:
+        with open(temp, "wb") as handle:
+            handle.write(data[img_off:img_off + size])
+        try:
+            fw, fh, pixels = read_png(temp)
+        finally:
+            os.remove(temp)
+        frames[max(width or 256, fw)] = (fw, fh, pixels)
+    if not frames:
         raise ValueError("ICO 中没有 PNG 帧，无法提取母版")
-    temp = os.path.join(BUILD, ".icon-source.png")
-    with open(temp, "wb") as handle:
-        handle.write(best[1])
-    try:
-        width, height, pixels = read_png(temp)
-    finally:
-        os.remove(temp)
-    box = ink_box(width, height, pixels)
-    return crop(pixels, width, box)
+    return frames
 
 
 # ------------------------------- 几何处理 -------------------------------
 
-def ink_box(width, height, rgba, threshold=8):
-    xs = []
-    ys = []
-    for y in range(height):
-        row = y * width * 4
-        for x in range(width):
-            if rgba[row + x * 4 + 3] > threshold:
-                xs.append(x)
-                ys.append(y)
-    if not xs:
-        raise ValueError("图标中没有可见像素")
-    return (min(xs), min(ys), max(xs) + 1, max(ys) + 1)
+def luminance(w, h, rgba):
+    """黑底白字的覆盖率场：亮度即字标在底上的占比。"""
+    field = [0.0] * (w * h)
+    for i in range(w * h):
+        alpha = rgba[i * 4 + 3] / 255.0
+        if alpha <= 0:
+            continue
+        lum = (rgba[i * 4] * 0.299 + rgba[i * 4 + 1] * 0.587 + rgba[i * 4 + 2] * 0.114) / 255.0
+        field[i] = lum * alpha
+    return field
 
 
-def crop(rgba, width, box):
-    x0, y0, x1, y1 = box
-    out_w = x1 - x0
-    out_h = y1 - y0
-    out = bytearray(out_w * out_h * 4)
-    for y in range(out_h):
-        src = ((y0 + y) * width + x0) * 4
-        out[y * out_w * 4:(y + 1) * out_w * 4] = rgba[src:src + out_w * 4]
-    return out_w, out_h, out
+def _kernel(x):
+    x = abs(x)
+    a = -0.5
+    if x <= 1:
+        return (a + 2) * x ** 3 - (a + 3) * x ** 2 + 1
+    if x < 2:
+        return a * x ** 3 - 5 * a * x ** 2 + 8 * a * x - 4 * a
+    return 0.0
 
 
-def column_spans(width, height, rgba, threshold=16):
-    spans = []
-    start = None
-    for x in range(width):
-        count = 0
-        for y in range(height):
-            if rgba[(y * width + x) * 4 + 3] > threshold:
-                count += 1
-        if count and start is None:
-            start = x
-        elif not count and start is not None:
-            spans.append((start, x))
-            start = None
-    if start is not None:
-        spans.append((start, width))
-    return spans
+def _taps(src_len, dst_len):
+    """预计算每列/每行的重采样权重，缩放时按比例加宽滤波器抑制摩尔纹。"""
+    scale = src_len / dst_len
+    filt = max(1.0, scale)
+    support = 2.0 * filt
+    table = []
+    for index in range(dst_len):
+        center = (index + 0.5) * scale - 0.5
+        taps = []
+        for src_index in range(int(center - support), int(center + support) + 2):
+            if 0 <= src_index < src_len:
+                weight = _kernel((src_index - center) / filt)
+                if weight:
+                    taps.append((src_index, weight))
+        total = sum(weight for _index, weight in taps) or 1.0
+        table.append([(src_index, weight / total) for src_index, weight in taps])
+    return table
 
 
-def split_monogram(width, height, rgba):
-    """在「D.」之后切分：找到句点（窄笔画）右侧的留白。"""
-    spans = column_spans(width, height, rgba)
-    cut = width
-    for index in range(1, len(spans)):
-        prev_w = spans[index - 1][1] - spans[index - 1][0]
-        cur_w = spans[index][1] - spans[index][0]
-        if prev_w > width * 0.3 and cur_w <= width * 0.16:
-            cut = spans[index][1]
-            break
-    return cut
-
-
-def resample(src, sw, sh, dw, dh):
-    """带 alpha 预乘的双三次重采样，避免边缘发灰。"""
-    def kernel(x):
-        x = abs(x)
-        a = -0.5
-        if x <= 1:
-            return (a + 2) * x ** 3 - (a + 3) * x ** 2 + 1
-        if x < 2:
-            return a * x ** 3 - 5 * a * x ** 2 + 8 * a * x - 4 * a
-        return 0.0
-
-    premul = [0.0] * (sw * sh * 4)
-    for i in range(sw * sh):
-        alpha = src[i * 4 + 3] / 255.0
-        premul[i * 4] = src[i * 4] * alpha
-        premul[i * 4 + 1] = src[i * 4 + 1] * alpha
-        premul[i * 4 + 2] = src[i * 4 + 2] * alpha
-        premul[i * 4 + 3] = src[i * 4 + 3]
-
-    # 水平
-    tmp = [0.0] * (dw * sh * 4)
-    scale_x = sw / dw
-    # 放大时滤波器宽度保持 2 个源像素，缩小时按比例加宽，否则放大退化成最近邻
-    filter_x = max(1.0, scale_x)
-    support_x = 2.0 * filter_x
+def resample(field, sw, sh, dw, dh):
+    if (sw, sh) == (dw, dh):
+        return list(field)
+    x_taps = _taps(sw, dw)
+    midway = [0.0] * (dw * sh)
     for y in range(sh):
-        for x in range(dw):
-            center = (x + 0.5) * scale_x - 0.5
-            left = int(center - support_x)
-            right = int(center + support_x) + 1
-            acc = [0.0, 0.0, 0.0, 0.0]
+        base = y * sw
+        for x, taps in enumerate(x_taps):
             total = 0.0
-            for sx in range(left, right + 1):
-                if sx < 0 or sx >= sw:
-                    continue
-                weight = kernel((sx - center) / filter_x)
-                if not weight:
-                    continue
-                base = (y * sw + sx) * 4
-                acc[0] += premul[base] * weight
-                acc[1] += premul[base + 1] * weight
-                acc[2] += premul[base + 2] * weight
-                acc[3] += premul[base + 3] * weight
-                total += weight
-            out = (y * dw + x) * 4
-            if total:
-                tmp[out] = acc[0] / total
-                tmp[out + 1] = acc[1] / total
-                tmp[out + 2] = acc[2] / total
-                tmp[out + 3] = acc[3] / total
-
-    # 垂直
-    scale_y = sh / dh
-    filter_y = max(1.0, scale_y)
-    support_y = 2.0 * filter_y
-    out_bytes = bytearray(dw * dh * 4)
-    for y in range(dh):
-        center = (y + 0.5) * scale_y - 0.5
-        top = int(center - support_y)
-        bottom = int(center + support_y) + 1
-        for x in range(dw):
-            acc = [0.0, 0.0, 0.0, 0.0]
-            total = 0.0
-            for sy in range(top, bottom + 1):
-                if sy < 0 or sy >= sh:
-                    continue
-                weight = kernel((sy - center) / filter_y)
-                if not weight:
-                    continue
-                base = (sy * dw + x) * 4
-                acc[0] += tmp[base] * weight
-                acc[1] += tmp[base + 1] * weight
-                acc[2] += tmp[base + 2] * weight
-                acc[3] += tmp[base + 3] * weight
-                total += weight
-            if total:
-                acc = [value / total for value in acc]
-            alpha = acc[3]
-            index = (y * dw + x) * 4
-            if alpha > 0:
-                out_bytes[index] = min(255, max(0, int(round(acc[0] * 255.0 / alpha))))
-                out_bytes[index + 1] = min(255, max(0, int(round(acc[1] * 255.0 / alpha))))
-                out_bytes[index + 2] = min(255, max(0, int(round(acc[2] * 255.0 / alpha))))
-                out_bytes[index + 3] = min(255, max(0, int(round(alpha))))
-    return out_bytes
+            for src_x, weight in taps:
+                total += field[base + src_x] * weight
+            midway[y * dw + x] = total
+    y_taps = _taps(sh, dh)
+    out = [0.0] * (dw * dh)
+    for y, taps in enumerate(y_taps):
+        row = [0.0] * dw
+        for src_y, weight in taps:
+            base = src_y * dw
+            for x in range(dw):
+                row[x] += midway[base + x] * weight
+        out[y * dw:(y + 1) * dw] = row
+    return out
 
 
-def compose(mark, size, ratio):
-    """把标记等比缩放并居中放入透明方形画布。"""
-    mw, mh, pixels = mark
-    box = size * ratio
-    scale = min(box / mw, box / mh)
-    dw = max(1, int(round(mw * scale)))
-    dh = max(1, int(round(mh * scale)))
-    scaled = resample(pixels, mw, mh, dw, dh)
-    canvas = bytearray(size * size * 4)
-    ox = (size - dw) // 2
-    oy = (size - dh) // 2
-    for y in range(dh):
-        src = y * dw * 4
-        dst = ((oy + y) * size + ox) * 4
-        canvas[dst:dst + dw * 4] = scaled[src:src + dw * 4]
-    return canvas
+def sharpen(field, amount=0.45):
+    """放大后重建立笔画边缘：以 0.5 为轴做轻度对比增强，避免灰边发糊。"""
+    return [
+        min(1.0, max(0.0, 0.5 + (value - 0.5) * (1.0 + amount)))
+        for value in field
+    ]
 
 
-def plate_canvas(size):
-    """浅色圆角底板，按有符号距离场做边缘抗锯齿。"""
-    radius = size * PLATE_RADIUS
+def rounded_alpha(size, ratio):
+    """圆角遮罩，按有符号距离场做边缘抗锯齿。"""
+    if ratio <= 0:
+        return bytearray([255]) * (size * size)
+    radius = size * ratio
     half = size / 2.0
     inner = half - radius
-    out = bytearray(size * size * 4)
+    out = bytearray(size * size)
     for y in range(size):
         dy = y + 0.5 - half
         for x in range(size):
@@ -340,110 +259,136 @@ def plate_canvas(size):
             qy = abs(dy) - inner
             outside = math.hypot(max(qx, 0.0), max(qy, 0.0)) + min(max(qx, qy), 0.0) - radius
             cover = min(1.0, max(0.0, 0.5 - outside))
-            if cover <= 0:
-                continue
-            index = (y * size + x) * 4
-            out[index] = PLATE_COLOR[0]
-            out[index + 1] = PLATE_COLOR[1]
-            out[index + 2] = PLATE_COLOR[2]
-            out[index + 3] = int(round(255 * cover))
+            out[y * size + x] = int(round(255 * cover))
     return out
 
 
-def compose_icon(mark, size, ratio):
-    """系统图标：字标叠在浅色底板上；OS_PLATE 关闭时退回透明画布。"""
-    if not OS_PLATE:
-        return compose(mark, size, ratio)
-    canvas = plate_canvas(size)
-    mw, mh, pixels = mark
-    box = size * ratio
-    scale = min(box / mw, box / mh)
-    dw = max(1, int(round(mw * scale)))
-    dh = max(1, int(round(mh * scale)))
-    scaled = resample(pixels, mw, mh, dw, dh)
-    ox = (size - dw) // 2
-    oy = (size - dh) // 2
-    for y in range(dh):
-        for x in range(dw):
-            src = (y * dw + x) * 4
-            alpha = scaled[src + 3] / 255.0
-            if alpha <= 0:
+def tile_rgba(field, size, radius):
+    mask = rounded_alpha(size, radius)
+    out = bytearray(size * size * 4)
+    for i in range(size * size):
+        value = int(round(min(1.0, max(0.0, field[i])) * 255))
+        out[i * 4] = value
+        out[i * 4 + 1] = value
+        out[i * 4 + 2] = value
+        out[i * 4 + 3] = mask[i]
+    return out
+
+
+def ink_box(field, w, h, threshold=0.03):
+    xs = []
+    ys = []
+    for y in range(h):
+        base = y * w
+        for x in range(w):
+            if field[base + x] > threshold:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        raise ValueError("图标中没有可见笔画")
+    return min(xs), min(ys), max(xs) + 1, max(ys) + 1
+
+
+def glyph_png(field, w, h, padding):
+    """抠出透明底黑字标：亮度转为 alpha，颜色统一压成纯黑。"""
+    x0, y0, x1, y1 = ink_box(field, w, h)
+    box_w = x1 - x0
+    box_h = y1 - y0
+    pad_x = int(round(box_w * padding))
+    pad_y = int(round(box_h * padding))
+    out_w = box_w + 2 * pad_x
+    out_h = box_h + 2 * pad_y
+    out = bytearray(out_w * out_h * 4)
+    for y in range(box_h):
+        for x in range(box_w):
+            alpha = int(round(min(1.0, max(0.0, field[(y0 + y) * w + x0 + x])) * 255))
+            if not alpha:
                 continue
-            dst = ((oy + y) * size + ox + x) * 4
-            canvas[dst] = int(round(scaled[src] * alpha + canvas[dst] * (1 - alpha)))
-            canvas[dst + 1] = int(round(scaled[src + 1] * alpha + canvas[dst + 1] * (1 - alpha)))
-            canvas[dst + 2] = int(round(scaled[src + 2] * alpha + canvas[dst + 2] * (1 - alpha)))
-    return canvas
+            dst = ((y + pad_y) * out_w + x + pad_x) * 4
+            out[dst] = 0
+            out[dst + 1] = 0
+            out[dst + 2] = 0
+            out[dst + 3] = alpha
+    return out_w, out_h, out
+
+
+def write(path, data):
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def save_png(path, size, rgba):
+    write(path, png_bytes(size, size, rgba))
 
 
 # ------------------------------- 主流程 -------------------------------
 
-def load_master():
-    if os.path.exists(MASTER):
-        width, height, pixels = read_png(MASTER)
-        return width, height, pixels
-    width, height, pixels = extract_master_from_ico(ICO_SOURCE)
-    with open(MASTER, "wb") as handle:
-        handle.write(png_bytes(width, height, pixels))
-    print("master extracted -> build/icon-master.png")
-    return width, height, pixels
+def load_source():
+    """母版优先；缺失时从源 ICO 的最大帧提取，并顺手修掉导出时的半透明边。"""
+    if not os.path.exists(MASTER):
+        if not os.path.exists(SOURCE_ICO):
+            raise SystemExit("缺少 build/icon-master.png 与 build/icon-source.ico")
+        frames = read_ico_frames(SOURCE_ICO)
+        w, h, pixels = frames[max(frames)]
+        clean = bytearray(pixels)
+        for i in range(w * h):
+            clean[i * 4 + 3] = 255
+        write(MASTER, png_bytes(w, h, clean))
+        print("master extracted -> build/icon-master.png")
+    w, h, pixels = read_png(MASTER)
+    return w, h, pixels
 
 
 def main():
     os.makedirs(BUILD, exist_ok=True)
     os.makedirs(ASSETS, exist_ok=True)
 
-    width, height, pixels = load_master()
-    cut = split_monogram(width, height, pixels)
-    monogram = crop(pixels, width, (0, 0, max(1, cut), height))
-    full = (width, height, pixels)
+    width, height, pixels = load_source()
+    master = luminance(width, height, pixels)
 
-    # 打包图标
-    with open(os.path.join(BUILD, "icon.png"), "wb") as handle:
-        handle.write(png_bytes(1024, 1024, compose_icon(full, 1024, WORDMARK_RATIO)))
-    with open(os.path.join(ASSETS, "icon.png"), "wb") as handle:
-        handle.write(png_bytes(512, 512, compose_icon(full, 512, WORDMARK_RATIO)))
+    frames = {}
+    if os.path.exists(SOURCE_ICO):
+        for size, (fw, fh, rgba) in read_ico_frames(SOURCE_ICO).items():
+            if fw == fh:
+                frames[size] = luminance(fw, fh, rgba)
 
-    ico_sizes = [16, 24, 32, 48, 64, 128, 256]
-    ico_images = []
-    for size in ico_sizes:
-        mark = monogram if size <= MONOGRAM_MAX else full
-        ratio = MARK_RATIO if size <= MONOGRAM_MAX else WORDMARK_RATIO
-        ico_images.append((size, png_bytes(size, size, compose_icon(mark, size, ratio))))
+    rendered = {}
 
-    ico_payload = ico_bytes(ico_images)
-    with open(os.path.join(BUILD, "icon.ico"), "wb") as handle:
-        handle.write(ico_payload)
-    with open(os.path.join(ASSETS, "icon.ico"), "wb") as handle:
-        handle.write(ico_payload)
+    def render(size):
+        if size in rendered:
+            return rendered[size]
+        native = frames.get(size)
+        if native and size <= width:
+            field = native
+        else:
+            field = resample(master, width, height, size, size)
+            if size > width:
+                field = sharpen(field)
+        rgba = tile_rgba(field, size, TILE_RADIUS)
+        rendered[size] = rgba
+        return rgba
 
-    icns_types = [
-        (16, b"icp4"),
-        (32, b"icp5"),
-        (64, b"icp6"),
-        (128, b"ic07"),
-        (256, b"ic08"),
-        (512, b"ic09"),
-        (1024, b"ic10"),
-    ]
-    icns_entries = []
-    for size, kind in icns_types:
-        mark = monogram if size <= MONOGRAM_MAX else full
-        ratio = MARK_RATIO if size <= MONOGRAM_MAX else WORDMARK_RATIO
-        icns_entries.append((kind, png_bytes(size, size, compose_icon(mark, size, ratio))))
-    with open(os.path.join(BUILD, "icon.icns"), "wb") as handle:
-        handle.write(icns_bytes(icns_entries))
+    # 打包图标：1024 供 mac/linux，ico 覆盖 Windows 全尺寸
+    save_png(os.path.join(BUILD, "icon.png"), 1024, render(1024))
+    save_png(os.path.join(ASSETS, "icon.png"), 512, render(512))
 
-    # 界面品牌标记：保留原始裁剪，不额外留白
-    with open(os.path.join(ASSETS, "logo-mark.png"), "wb") as handle:
-        handle.write(png_bytes(monogram[0], monogram[1], monogram[2]))
-    with open(os.path.join(ASSETS, "logo-wordmark.png"), "wb") as handle:
-        handle.write(png_bytes(width, height, pixels))
+    ico_payload = ico_bytes([(size, png_bytes(size, size, render(size))) for size in ICO_SIZES])
+    write(os.path.join(BUILD, "icon.ico"), ico_payload)
+    write(os.path.join(ASSETS, "icon.ico"), ico_payload)
 
-    print(
-        "icons: build/icon.{png,ico,icns}, assets/{icon.png,icon.ico,logo-mark.png,logo-wordmark.png}"
+    icns_payload = icns_bytes(
+        [(kind, png_bytes(size, size, render(size))) for size, kind in ICNS_TYPES]
     )
-    print(f"monogram split at x={cut} (master {width}x{height})")
+    write(os.path.join(BUILD, "icon.icns"), icns_payload)
+
+    # 界面品牌标记：透明底黑字标，深色主题由 .logo { filter: invert(1) } 反相
+    for name, padding in LOGOS.items():
+        gw, gh, glyph = glyph_png(master, width, height, padding)
+        write(os.path.join(ASSETS, name), png_bytes(gw, gh, glyph))
+        print(f"{name}: {gw}x{gh}")
+
+    print("icons: build/icon.{png,ico,icns} + assets/{icon.png,icon.ico}")
+    print(f"tile radius {TILE_RADIUS:g}, master {width}x{height}")
 
 
 if __name__ == "__main__":

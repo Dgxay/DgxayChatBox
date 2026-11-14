@@ -296,10 +296,10 @@ DCB_HOME=/tmp/dcb-test npm start
 
 ### 10.1 图标与品牌标记
 
-- **来源唯一**：所有图标由 `scripts/make_icons.py` 从 `build/icon-master.png`（透明底、纯黑 `D.AI` 字标）派生；母版缺失时会从 `build/icon.ico` 的最大 PNG 帧提取并裁剪。换标只替换母版后重跑脚本，不要手改产物。
-- **界面用法**：标题栏与引导页用 `assets/logo-mark.png`（`.logo`，方形占位 21/24px），关于卡片用 `assets/logo-wordmark.png`（高 32px、宽度自适应）。两者都是透明黑，`[data-theme='dark']` 下由 `.logo { filter: invert(1) }` 统一反相；不要为深色单独切图，也不要用 `filter` 之外的染色方案。
-- **系统图标**：`build/icon.{png,ico,icns}` 与 `assets/icon.png` 是「浅色圆角底板 + 黑字标」。纯透明字标在深色任务栏/桌面上会消失，底板是可见性保障；确实要透明版本时把脚本里的 `OS_PLATE` 改为 `False` 后重跑。
-- **尺寸阶梯**：16/24/32/48/64 用「D.」单字，128/256/512/1024 用完整字标。小尺寸塞完整 `.AI` 会糊成黑块，这是有意取舍。
+- **来源唯一**：所有图标由 `scripts/make_icons.py` 从 `build/icon-master.png`（256×256、纯黑方形底 + 白色几何字标）派生。原始素材留在 `build/icon-source.ico`，母版缺失时脚本取其最大 PNG 帧补齐并把导出时的半透明边压成实色。换标只替换这两者之一后重跑脚本，不要手改产物。
+- **界面用法**：标题栏与引导页用 `assets/logo-mark.png`（`.logo`，方形占位 21/24px），关于卡片用 `assets/logo-wordmark.png`（高 32px、宽度自适应）。两者都是脚本从母版抠出的「透明底 + 纯黑字标」，`[data-theme='dark']` 下由 `.logo { filter: invert(1) }` 统一反相；不要为深色单独切图，也不要用 `filter` 之外的染色方案。
+- **系统图标**：`build/icon.{png,ico,icns}` 与 `assets/icon.png` 是黑底白字标的整块图，边缘按 `TILE_RADIUS`（默认 0.18）做圆角遮罩抗锯齿；改 0 即回到源文件的直角方块。母版自带深色底，不再需要旧版的浅色底板（`OS_PLATE` 已移除）。
+- **尺寸阶梯**：16–256 直接取 `build/icon-source.ico` 里的原生帧（作者已按小尺寸调过笔画），512/1024 由 256 帧放大后做对比增强重建，避免灰边发糊。新增或替换源 ICO 时保持这套尺寸梯队，缺帧会退回放大路径。
 - **可访问性**：三处品牌标记都是装饰性图片，保持 `alt=""` 与 `aria-hidden="true"`，产品名由相邻文本承担，避免读屏重复朗读；功能图标（`icons.js`）继续使用 24×24、`currentColor`、1.7 描边，品牌替换不改动它们的语义与标签。
 - **布局约束**：`.logo` 在标题栏固定 21×21、引导页 24×24，换图不要改这两个尺寸与 flex gap；关于卡片只约束高度，宽度随字标比例自适应，避免撑破卡片。
 
@@ -373,8 +373,8 @@ python scripts/make-deb.py
 
 ### 11.6 图标与打包清理
 
-- 图标由 `scripts/make_icons.py` 从 `build/icon-master.png` 生成 `build/icon.png`、`icon.ico`、`icon.icns` 与 `src/renderer/assets/` 下的 `icon.png`、`icon.ico`、`logo-mark.png`、`logo-wordmark.png`。母版缺失时脚本会自动从 `build/icon.ico` 的最大 PNG 帧提取；换标后必须重跑，否则安装包仍是旧图标。
-- ICO 固定 7 帧（16/24/32/48/64/128/256），ICNS 覆盖 16～1024；小尺寸用单字、大尺寸用完整字标，规则见 §10.1。
+- 图标由 `scripts/make_icons.py` 从 `build/icon-master.png` 生成 `build/icon.png`、`icon.ico`、`icon.icns` 与 `src/renderer/assets/` 下的 `icon.png`、`icon.ico`、`logo-mark.png`、`logo-wordmark.png`。母版缺失时脚本会自动从 `build/icon-source.ico` 的最大 PNG 帧提取；换标后必须重跑，否则安装包仍是旧图标。
+- ICO 固定 7 帧（16/24/32/48/64/128/256），ICNS 覆盖 16～1024；小尺寸直接复用源 ICO 的原生帧，大尺寸由 256 帧放大重建，规则见 §10.1。
 - 在非 Windows 主机上校验 ICO 时，不要直接用系统图片查看器判断 16px 效果，它可能隐藏真实像素；用脚本导出单帧再放大看。
 - 打包前建议 `npm ci` 并确认 `dist/`、`.test/`、`.tmp-*` 已清理，避免把测试文件带进 asar。
 
